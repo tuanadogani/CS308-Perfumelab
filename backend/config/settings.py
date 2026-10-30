@@ -24,6 +24,7 @@ INSTALLED_APPS = [
     "reviews",
     "wishlist",
     "refunds",
+    "payments",
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
