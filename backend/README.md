@@ -1,70 +1,60 @@
-# Perfume backend — Django + PostgreSQL
+# PerfumeLab Backend
 
-Django + PostgreSQL tabanlı backend API. Aşağıdaki komutları `backend` klasöründe çalıştırın.
+Django and PostgreSQL backend. Email login, token refresh, and user profile endpoints are available.
 
-## Yerel geliştirme
+## Setup
 
-Python 3.13 ve PostgreSQL 17 gerekir. macOS/Homebrew kurulumu:
+Requires Python 3.13 and PostgreSQL 17. Run these commands from the `backend` folder.
 
-```sh
-brew install python@3.13 postgresql@17
-```
-
-Python ortamı ve paketler:
-
-```sh
-/opt/homebrew/bin/python3.13 -m venv .venv
+```bash
+python3.13 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.lock.txt
+pip install -r requirements.lock.txt
 ```
 
-`.env.example` dosyasını `.env` adıyla kopyalayın; `DJANGO_SECRET_KEY` ve PostgreSQL bilgilerini kendinize göre doldurun. `.env` Git'e eklenmez. Yerel kurulumda bu dosya otomatik hazırlanmış olabilir; mevcut dosyayı değiştirmeden kontrol edin.
+For a new local database on macOS with Homebrew:
 
-PostgreSQL çalışıyor olmalı. Yeni bir Mac'te `perfume_app` rolünü, `perfume` veritabanını ve `.env` dosyasını hazırlamak için `brew services start postgresql@17` ardından `python scripts/setup_local_db.py` kullanılabilir. Bu betik mevcut `.env`, rol veya veritabanını değiştirmez.
+```bash
+brew services start postgresql@17
+python scripts/setup_local_db.py
+```
 
-```sh
-python manage.py check --database default
+The script creates the database, application user, and `.env` file. To use an existing database, copy `.env.example` to `.env` and fill in the database credentials and `DJANGO_SECRET_KEY`. Keep `.env` out of Git.
+
+```bash
+python manage.py migrate
+python manage.py createsuperuser
 python manage.py runserver
 ```
 
-`http://127.0.0.1:8000/api/health/` adresi veritabanına gerçek bir sorgu gönderir. Başarılı yanıt:
+Use `createsuperuser` to create an admin account for testing. Registration is not available yet.
+
+## Endpoints
+
+Base URL: `http://127.0.0.1:8000`
+
+- `GET /api/health/` — check the database connection.
+- `POST /api/auth/login/` — log in and get access and refresh tokens.
+- `POST /api/auth/refresh/` — get new tokens using a refresh token.
+- `GET /api/auth/me/` — get the current user's profile.
+
+Login request (JSON):
 
 ```json
-{"status": "ok", "database": "connected"}
+{
+  "email": "user@example.com",
+  "password": "your-password"
+}
 ```
 
-Veritabanına erişilemiyorsa HTTP 503 döner. Kullanıcı tabloları migration ile yönetilir; yeni kurulumlarda sunucuyu başlatmadan önce `python manage.py migrate` çalıştırın.
+Send `Authorization: Bearer ACCESS_TOKEN` with requests to `me`. To refresh tokens, send `{"refresh": "REFRESH_TOKEN"}` and save the new refresh token from the response. Access tokens last 15 minutes; refresh tokens last one day.
 
-Bağlantı ayarları: `config/settings.py`. PostgreSQL sürücüsü olarak psycopg kullanılır: https://docs.djangoproject.com/en/5.2/ref/databases/#postgresql-notes
+Set frontend origins through `CORS_ALLOWED_ORIGINS` in `.env`. Defaults are `http://localhost:3000` and `http://localhost:5173`.
 
-## Giriş API'si
+## Tests
 
-Kullanıcı modeli `accounts.User` e-posta ile giriş yapar. Şifreler Django'nun parola hash mekanizmasıyla saklanır. Tabloları oluşturmak için `python manage.py migrate` çalıştırın.
+Tests use a separate `test_perfume` database. Create it with a PostgreSQL admin account and set the application user as its owner, then run:
 
-İlk hesabı terminalden oluşturun (parolayı komut satırında gizli olarak sorar):
-
-```sh
-python manage.py createsuperuser
-```
-
-Bu komut yönetici hesabı oluşturur; herkese açık kayıt API'si henüz yoktur.
-
-| İstek | Gövde / başlık | Sonuç |
-| --- | --- | --- |
-| `POST /api/auth/login/` | `{"email":"kullanici@example.com","password":"parolaniz"}` | `access` ve `refresh` token'ları |
-| `POST /api/auth/refresh/` | `{"refresh":"REFRESH_TOKEN"}` | Yeni `access` ve yeni `refresh` |
-| `GET /api/auth/me/` | `Authorization: Bearer ACCESS_TOKEN` | `id`, `email`, `first_name`, `last_name` |
-
-POST isteklerinde `Content-Type: application/json` gönderin. Access token 15 dakika, refresh token 1 gün geçerlidir. Yenileme sonrası eski refresh tekrar kullanılamaz; frontend yeni refresh değerini saklamalıdır.
-
-Eksik/geçersiz alanlar `400`, hatalı giriş veya geçersiz token `401`, giriş denemesi limiti `429` döndürür. Giriş ve yenileme istekleri IP başına toplam 10/dakika ile sınırlandırılır. Varsayılan sınırlandırma tek süreç belleğini kullanır; çok süreçli canlı ortamda ortak cache ve proxy ayarları gerekir.
-
-Frontend geliştirme adresleri `.env` içindeki `CORS_ALLOWED_ORIGINS` ile virgülle ayrılarak tanımlanır. Varsayılan olarak `http://localhost:3000` ve `http://localhost:5173` kabul edilir.
-
-Testler ayrı `test_perfume` veritabanını kullanır. Test veritabanını hazırladıktan sonra:
-
-```sh
+```bash
 python manage.py test accounts --keepdb
 ```
-
-Yeni kurulumlarda test veritabanını PostgreSQL yöneticisiyle uygulama rolüne ait oluşturun veya test kullanıcısına test veritabanı oluşturma yetkisi sağlayın. Uygulama rolünün günlük kullanımda veritabanı oluşturma yetkisine ihtiyacı yoktur.
