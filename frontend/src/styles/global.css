@@ -82,7 +82,7 @@ img, svg { max-width: 100%; }
 
 /* ===== Product cards ===== */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 1.5rem; }
-.product-card { background: var(--paper); border: 1px solid var(--line); display: flex; flex-direction: column; transition: box-shadow .25s, transform .25s; }
+.product-card { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); display: flex; flex-direction: column; transition: box-shadow .25s, transform .25s; overflow: hidden; }
 .product-card:hover { box-shadow: var(--shadow); transform: translateY(-3px); }
 .product-card__media { display: grid; place-items: center; height: 240px; background: linear-gradient(180deg, #f3ede3, var(--paper)); }
 .product-card.is-out .product-card__media { filter: grayscale(.7); opacity: .7; }
