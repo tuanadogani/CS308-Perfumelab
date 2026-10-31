@@ -29,9 +29,21 @@ class UserManager(BaseUserManager):
         return self.create_user(email, password, **extra_fields)
 
 
+class Role(models.TextChoices):
+    # Values match frontend/src/constants/roles.js exactly.
+    CUSTOMER = "customer", "Customer"
+    SALES_MANAGER = "sales_manager", "Sales Manager"
+    PRODUCT_MANAGER = "product_manager", "Product Manager"
+    SUPPORT_AGENT = "support_agent", "Support Agent"
+
+
 class User(AbstractUser):
     username = None
     email = models.EmailField(unique=True)
+    name = models.CharField(max_length=150, blank=True)
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.CUSTOMER)
+    tax_id = models.CharField(max_length=20, blank=True)
+    home_address = models.TextField(blank=True)
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []
     objects = UserManager()
