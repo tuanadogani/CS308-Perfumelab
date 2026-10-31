@@ -30,6 +30,7 @@ export default function Navbar() {
           ) : (
             <NavLink to="/login">Log in</NavLink>
           )}
+          <NavLink to="/wishlist" aria-label="Wishlist">Wishlist</NavLink>
           <NavLink to="/cart" className="cart-link" aria-label="Cart">
             Cart <span className="cart-count">{count}</span>
           </NavLink>

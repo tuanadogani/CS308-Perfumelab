@@ -10,6 +10,7 @@ import RegisterPage from './pages/RegisterPage';
 import ShopPage from './pages/ShopPage';
 import ProductDetailPage from './pages/ProductDetailPage';
 import CartPage from './pages/CartPage';
+import WishlistPage from './pages/WishlistPage';
 import ProfilePage from './pages/ProfilePage';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import { NotFoundPage, UnauthorizedPage } from './pages/StatusPages';
@@ -26,6 +27,7 @@ export default function App() {
         <Route path="/shop" element={<ShopPage />} />
         <Route path="/shop/:id" element={<ProductDetailPage />} />
         <Route path="/cart" element={<CartPage />} />
+        <Route path="/wishlist" element={<WishlistPage />} />
 
         {/* Login required */}
         <Route element={<ProtectedRoute />}>
