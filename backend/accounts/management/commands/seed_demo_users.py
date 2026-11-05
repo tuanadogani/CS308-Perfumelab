@@ -7,10 +7,10 @@ from payments.models import CreditCard
 
 PASSWORD = "Demo1234"
 DEMO_USERS = [
-    ("customer@demo.com", Role.CUSTOMER, "Alice Customer", "11111111111", "Kadikoy, Istanbul"),
-    ("sales@demo.com", Role.SALES_MANAGER, "Sarah Sales", "", ""),
-    ("product@demo.com", Role.PRODUCT_MANAGER, "Paul Product", "", ""),
-    ("support@demo.com", Role.SUPPORT_AGENT, "Sam Support", "", ""),
+    ("customer@demo.com", Role.CUSTOMER, "Ross Customer", "11111111111", "Kadikoy, Istanbul"),
+    ("sales@demo.com", Role.SALES_MANAGER, "Monica Sales", "", ""),
+    ("product@demo.com", Role.PRODUCT_MANAGER, "Phoebe Product", "", ""),
+    ("support@demo.com", Role.SUPPORT_AGENT, "Joey Support", "", ""),
 ]
 
 
@@ -26,8 +26,12 @@ class Command(BaseCommand):
             if created:
                 user.set_password(PASSWORD)
                 user.save()
+            else:
+                user.name = name
+                user.role = role
+                user.save(update_fields=["name", "role"])
             self.stdout.write(f"{'created' if created else 'exists '}  {email:20} {role}")
         customer = User.objects.get(email="customer@demo.com")
         if not customer.cards.exists():
-            CreditCard.from_number(customer, "4242424242424242", "Alice Customer", 12, 2030, brand="Visa")
+            CreditCard.from_number(customer, "4242424242424242", "Ross Customer", 12, 2030, brand="Visa")
             self.stdout.write("saved demo card 4242 4242 4242 4242 for the customer (a card ending 0002 is declined)")
