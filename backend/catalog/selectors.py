@@ -8,8 +8,12 @@ SORTS = {
 }
 
 
-def search_products(queryset, q="", category="", brand="", family="", sort="popularity"):
-    """Out-of-stock products are deliberately kept in the results."""
+def search_products(queryset, q="", category="", brand="", family=(), sort="popularity"):
+    """Out-of-stock products are deliberately kept in the results.
+
+    `family` accepts one name or a list of names; a product must belong to every
+    selected family (AND), so each extra family narrows the results.
+    """
     q = (q or "").strip()
     if q:
         queryset = queryset.filter(
@@ -19,6 +23,7 @@ def search_products(queryset, q="", category="", brand="", family="", sort="popu
         queryset = queryset.filter(category__slug=category)
     if brand:
         queryset = queryset.filter(brand__name=brand)
-    if family:
-        queryset = queryset.filter(families__name=family)
+    families = [family] if isinstance(family, str) else list(family or ())
+    for name in filter(None, families):
+        queryset = queryset.filter(families__name=name)
     return queryset.order_by(*SORTS.get(sort, SORTS["popularity"])).distinct()
