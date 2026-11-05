@@ -1,8 +1,8 @@
 # Product photo sources
 
 One photo per perfume, named `<serial_number>.jpg`, resized to 800x800 on white.
-The 15 most popular also have a transparent cut-out `<serial_number>.png`
-(background removed from the same photo); when both exist the PNG is used.
+Every perfume also has a transparent cut-out `<serial_number>.png` (background
+removed from the same photo). The site uses the PNG; the JPG is kept as the original.
 The photos belong to their brands/retailers and are used only in this
 non-public university demo (CS308). Do not deploy them on a public site.
 
