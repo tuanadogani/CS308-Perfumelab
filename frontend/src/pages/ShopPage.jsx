@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ProductCard from '../components/ProductCard';
-import { getProducts, getCategories, getBrandList, getFamilies } from '../api/productApi';
+import { getProducts, getCategories, getFilters } from '../api/productApi';
 
 // Requirements 1 & 7: categories, search (name/description), sort by price/popularity, brand & note filters
 export default function ShopPage() {
   const [params, setParams] = useSearchParams(); // filters live in the URL → shareable links, back button works
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [brands, setBrands] = useState([]);
-  const [families, setFamilies] = useState([]);
+  const [options, setOptions] = useState({ brands: [], families: [] });
+  const [brandPool, setBrandPool] = useState([]); // products matching every filter except brand
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState(params.get('q') ?? '');
@@ -39,10 +39,8 @@ export default function ShopPage() {
     setParams(next, { replace: true });
   };
 
-  useEffect(() => {
-    getCategories().then(setCategories).catch(() => setCategories([]));
-    getFamilies().then(setFamilies).catch(() => setFamilies([]));
-  }, []);
+  useEffect(() => { getCategories().then(setCategories); }, []);
+  useEffect(() => { getFilters().then(setOptions).catch(() => {}); }, []); // sidebar still works without them
 
   useEffect(() => {
     let cancelled = false;
@@ -54,21 +52,18 @@ export default function ShopPage() {
     return () => { cancelled = true; };
   }, [filters]);
 
-  // Brand options follow the other filters, so every brand in the list returns results
+  // While a brand is selected, the product list only holds that brand. To still offer the
+  // other brands that match the remaining filters, load the list without the brand filter.
   const familyKey = filters.family.join('|');
   useEffect(() => {
+    if (!filters.brand) return undefined;
     let cancelled = false;
-    getBrandList({ q: filters.q, category: filters.category, family: filters.family })
-      .then((list) => { if (!cancelled) setBrands(list); })
-      .catch(() => { if (!cancelled) setBrands([]); });
+    getProducts({ q: filters.q, category: filters.category, family: filters.family })
+      .then((list) => { if (!cancelled) setBrandPool(list); })
+      .catch(() => { if (!cancelled) setBrandPool([]); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.q, filters.category, familyKey]);
-
-  // Keep the selected brand in the list so it can always be cleared
-  const brandOptions = filters.brand && !brands.includes(filters.brand)
-    ? [...brands, filters.brand].sort()
-    : brands;
+  }, [filters.brand, filters.q, filters.category, familyKey]);
 
   // Search box: 300 ms debounce so we don't send a request on every keystroke
   useEffect(() => {
@@ -77,14 +72,19 @@ export default function ShopPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
-  // Only offer families that still return results: a family is available when at least
-  // one listed product has it (selections are combined with AND). Selected ones stay
-  // visible so they can always be cleared.
-  const availableFamilies = useMemo(() => {
+  // Only offer options that still return results. Selected options always stay visible
+  // so they can be cleared.
+  const brands = useMemo(() => {
+    const present = new Set((filters.brand ? brandPool : products).map((p) => p.brand));
+    return options.brands.map((b) => b.name).filter((b) => present.has(b) || b === filters.brand);
+  }, [options.brands, products, brandPool, filters.brand]);
+  // Selected families are combined with AND, so a family is available when at least
+  // one listed product has it.
+  const families = useMemo(() => {
     const present = new Set(products.flatMap((p) => p.families ?? []));
-    return families.filter((f) => present.has(f) || filters.family.includes(f));
-  }, [families, products, filters.family]);
-
+    return options.families.map((f) => f.name)
+      .filter((f) => present.has(f) || filters.family.includes(f));
+  }, [options.families, products, filters.family]);
   const hasFilters = filters.q || filters.category || filters.brand || filters.family.length > 0;
 
   return (
@@ -112,12 +112,12 @@ export default function ShopPage() {
           <h4>Brand</h4>
           <select value={filters.brand} onChange={(e) => setFilter('brand', e.target.value)}>
             <option value="">All brands</option>
-            {brandOptions.map((b) => <option key={b}>{b}</option>)}
+            {brands.map((b) => <option key={b}>{b}</option>)}
           </select>
 
           <h4>Scent Family</h4>
           <div className="chips">
-            {availableFamilies.map((f) => (
+            {families.map((f) => (
               <button key={f} className={`chip ${filters.family.includes(f) ? 'active' : ''}`}
                 aria-pressed={filters.family.includes(f)} onClick={() => toggleFamily(f)}>{f}</button>
             ))}

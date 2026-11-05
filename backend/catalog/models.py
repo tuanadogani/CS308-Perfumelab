@@ -69,6 +69,8 @@ class Product(models.Model):
     families = models.ManyToManyField(NoteFamily, blank=True, related_name="products")
     popularity = models.PositiveIntegerField(default=0)  # bumped on every purchase
     active = models.BooleanField(default=True)  # soft delete; orders keep referencing the row
+    # File name inside catalog/product_images/ (blank = frontend draws a bottle instead).
+    image = models.CharField(max_length=200, blank=True, default="")
 
     created_at = models.DateTimeField(auto_now_add=True)
 
