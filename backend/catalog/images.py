@@ -41,13 +41,14 @@ def find_photo(serial_number):
 def link_images(products):
     """Point product.image at its photo (PNG first, then JPG). Returns how many changed.
 
-    Products without a photo file are left alone, so the frontend keeps drawing
-    its placeholder bottle for them.
+    If a product has no photo file any more (file deleted, serial number changed),
+    its old file name is cleared, so the frontend draws its placeholder bottle
+    instead of showing a broken image.
     """
     changed = 0
     for product in products:
         filename = find_photo(product.serial_number)
-        if filename and product.image != filename:
+        if product.image != filename:
             product.image = filename
             product.save(update_fields=["image"])
             changed += 1

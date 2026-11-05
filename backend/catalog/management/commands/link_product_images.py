@@ -17,6 +17,6 @@ class Command(BaseCommand):
         products = Product.objects.order_by("id")
         changed = link_images(products)
         missing = [p.name for p in products if not p.image]
-        self.stdout.write(self.style.SUCCESS(f"Linked {changed} photo(s)."))
+        self.stdout.write(self.style.SUCCESS(f"Updated {changed} product photo link(s)."))
         for name in missing:
             self.stdout.write(self.style.WARNING(f"no photo yet: {name}"))
