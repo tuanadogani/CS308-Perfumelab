@@ -220,3 +220,24 @@ class ProductImageTests(APITestCase):
         p = make_product(serial_number="GONE", image="GONE.jpg", active=False)
         self._photo("GONE.jpg")
         self.assertEqual(self.client.get(f"/api/products/{p.pk}/image/").status_code, 404)
+
+
+class FilterOptionsTests(TestCase):
+    def test_lists_brands_and_families_with_counts(self):
+        from .models import NoteFamily
+        from .selectors import filter_options
+        woody, _ = NoteFamily.objects.get_or_create(name="Woody")
+        a = make_product(brand="Dior")
+        make_product(brand="Dior")
+        make_product(brand="Chanel")
+        a.families.add(woody)
+        opts = filter_options()
+        self.assertEqual(opts["brands"], [{"name": "Chanel", "count": 1}, {"name": "Dior", "count": 2}])
+        self.assertEqual(opts["families"], [{"name": "Woody", "count": 1}])
+        self.assertEqual(opts["categories"][0]["slug"], "eau-de-parfum")
+
+    def test_hides_brands_with_only_inactive_products(self):
+        from .selectors import filter_options
+        make_product(brand="Gone", active=False)
+        make_product(brand="Here")
+        self.assertEqual([b["name"] for b in filter_options()["brands"]], ["Here"])
