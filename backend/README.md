@@ -95,3 +95,14 @@ Cart, orders, payments, refunds and reviews contain models/services and tests, b
 no HTTP API routes yet. The frontend cart still uses localStorage, checkout shows a placeholder,
 and admin screens are skeletons. These features need authenticated API views, ownership/role
 checks and frontend screens before they can be used end to end. Payments currently use a mock bank.
+
+## Wishlist
+
+- `GET /api/wishlist/` — current user's saved products (catalog product schema).
+- `PUT /api/wishlist/<product_id>/` — save an active product, including sold-out products; repeated requests are safe.
+- `DELETE /api/wishlist/<product_id>/` — remove the current user's favorite; repeated requests are safe.
+
+All wishlist endpoints require Bearer authentication and only access the current user's entries.
+The frontend shares wishlist state between product cards, product details and `/wishlist`.
+Signed-in users save to PostgreSQL; guests and mock accounts save locally in separate browser storage keys.
+Guest favorites remain separate from account favorites; automatic merging is not implemented.
