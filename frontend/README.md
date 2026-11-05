@@ -68,3 +68,11 @@ proxy is not included in the static build. For cross-origin hosting configure ba
 - Merge the guest cart with the backend cart on login (`POST /cart/merge`)
 - Checkout, invoices, order history, comments/ratings, admin modules
 - Real product photos: if a product has an `imageUrl`, `PerfumeBottle` renders an `<img>` automatically
+
+## Wishlist
+
+The heart controls in the catalog and product details share a WishlistProvider. Saved products
+appear on `/wishlist` and can be removed there. Real signed-in accounts use authenticated
+`GET /wishlist/`, `PUT /wishlist/:id/` and `DELETE /wishlist/:id/` requests. Guests and mock
+accounts use separate localStorage keys; guest favorites do not automatically merge on login.
+Loading and request failures are shown explicitly; failed updates do not change the saved state.

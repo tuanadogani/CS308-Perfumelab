@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import PerfumeBottle from '../components/PerfumeBottle';
+import WishlistButton from '../components/WishlistButton';
 import StockBadge from '../components/StockBadge';
 import { getProduct } from '../api/productApi';
 import { useCart } from '../context/CartContext';
@@ -13,7 +14,6 @@ export default function ProductDetailPage() {
   const [error, setError] = useState('');
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
-  const [isWishlisted, setIsWishlisted] = useState(false);
 
   useEffect(() => {
     setProduct(null); setError('');
@@ -45,16 +45,7 @@ export default function ProductDetailPage() {
           <p className="eyebrow">{product.brand}</p>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
             <h1 style={{ margin: 0 }}>{product.name}</h1>
-            <button
-              className={`wishlist-btn wishlist-btn--large ${isWishlisted ? 'is-wishlisted' : ''}`}
-              onClick={() => setIsWishlisted(!isWishlisted)}
-              aria-label={isWishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
-              title={isWishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
-            >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill={isWishlisted ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
-                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
-              </svg>
-            </button>
+            <WishlistButton product={product} large />
           </div>
           <p className="muted">{product.gender} · {product.volumeMl} ml · ★ {product.rating}</p>
           <p className="price price--lg">{formatPrice(product.price)}</p>

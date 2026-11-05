@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { request, setAccessToken } from '../api/client';
 import { login } from '../api/authApi';
 import { getProducts, getProduct, getCategories } from '../api/productApi';
+import { getWishlist, addToWishlist, removeFromWishlist } from '../api/wishlistApi';
 
 const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
 afterEach(() => { setAccessToken(null); vi.unstubAllGlobals(); });
@@ -47,6 +48,19 @@ describe('real API contract', () => {
     vi.stubGlobal('fetch', fetch);
     await request('/auth/logout/', { method: 'POST', body: { refresh: 'refresh' } });
     expect(JSON.parse(fetch.mock.calls[2][1].body)).toEqual({ refresh: 'rotated' });
+  });
+
+  it('loads, adds and removes wishlist products using authenticated requests', async () => {
+    const fetch = vi.fn().mockResolvedValue(response([]));
+    vi.stubGlobal('fetch', fetch);
+    setAccessToken('wishlist-token');
+    await getWishlist();
+    await addToWishlist(4);
+    await removeFromWishlist(4);
+    expect(fetch.mock.calls.map(([url, options]) => [url, options.method])).toEqual([
+      ['/api/wishlist/', 'GET'], ['/api/wishlist/4/', 'PUT'], ['/api/wishlist/4/', 'DELETE'],
+    ]);
+    expect(fetch.mock.calls.every(([, options]) => options.headers.Authorization === 'Bearer wishlist-token')).toBe(true);
   });
 
   it('displays Django field validation errors', async () => {

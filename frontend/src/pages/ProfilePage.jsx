@@ -13,7 +13,7 @@ export default function ProfilePage() {
           <dt>Email</dt><dd>{user.email}</dd>
           <dt>Home Address</dt><dd>{user.homeAddress || '—'}</dd>
         </dl>
-        <p className="muted small">Order history and wish list will be added in later sprints.</p>
+        <p className="muted small">Order history will be added in a later sprint.</p>
       </div>
     </div>
   );
