@@ -1,7 +1,8 @@
 """Where product photos live on disk and how a photo is found for a perfume.
 
-Each photo is saved as catalog/product_images/<serial_number>.jpg and committed to
-git, so a fresh database (local or Supabase) can get its photos back with
+Each photo is saved as catalog/product_images/<serial_number>.jpg (white background)
+or .png (transparent cut-out, used first when present) and committed to
+git, so a fresh database can get its photos back with
 `python manage.py link_product_images`. Where each photo came from is listed in
 catalog/product_images/SOURCES.md.
 """
@@ -25,16 +26,28 @@ def image_path(filename):
     return path if path.is_file() else None
 
 
+# A transparent cut-out (.png) wins over the white-background photo (.jpg) when both exist.
+PREFERRED_EXTENSIONS = (".png", ".jpg")
+
+
+def find_photo(serial_number):
+    """File name of the best photo for a product, or "" if there is none."""
+    for ext in PREFERRED_EXTENSIONS:
+        if image_path(serial_number + ext):
+            return serial_number + ext
+    return ""
+
+
 def link_images(products):
-    """Set product.image to "<serial>.jpg" when that file exists. Returns how many changed.
+    """Point product.image at its photo (PNG first, then JPG). Returns how many changed.
 
     Products without a photo file are left alone, so the frontend keeps drawing
     its placeholder bottle for them.
     """
     changed = 0
     for product in products:
-        filename = f"{product.serial_number}.jpg"
-        if image_path(filename) and product.image != filename:
+        filename = find_photo(product.serial_number)
+        if filename and product.image != filename:
             product.image = filename
             product.save(update_fields=["image"])
             changed += 1

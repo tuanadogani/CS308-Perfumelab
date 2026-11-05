@@ -174,11 +174,39 @@ class ProductImageTests(APITestCase):
         self.assertEqual(link_images(Product.objects.all()), 1)
         self.assertEqual(link_images(Product.objects.all()), 0)
 
+    def test_link_prefers_transparent_png_over_jpg(self):
+        both = make_product(serial_number="BOTH")
+        only_jpg = make_product(serial_number="JPG-ONLY")
+        for name in ("BOTH.jpg", "BOTH.png", "JPG-ONLY.jpg"):
+            self._photo(name)
+        call_command("link_product_images", stdout=StringIO())
+        both.refresh_from_db()
+        only_jpg.refresh_from_db()
+        self.assertEqual(both.image, "BOTH.png")
+        self.assertEqual(only_jpg.image, "JPG-ONLY.jpg")
+
+    def test_image_url_changes_when_the_photo_changes(self):
+        # Browsers cache the photo for a day; a new file name must give a new address.
+        p = make_product(serial_number="SWAP", image="SWAP.jpg")
+        self._photo("SWAP.jpg")
+        before = self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"]
+        p.image = "SWAP.png"
+        p.save(update_fields=["image"])
+        after = self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"]
+        self.assertNotEqual(before, after)
+
+    def test_png_is_served_as_png(self):
+        p = make_product(serial_number="CUT", image="CUT.png")
+        self._photo("CUT.png")
+        response = self.client.get(f"/api/products/{p.pk}/image/")
+        response.close()  # release the file, or Windows can't delete the temp folder
+        self.assertEqual(response["Content-Type"], "image/png")
+
     def test_api_gives_image_url_and_serves_the_file(self):
         p = make_product(serial_number="SERVE", image="SERVE.jpg")
         self._photo("SERVE.jpg")
         data = self.client.get(f"/api/products/{p.pk}/").json()
-        self.assertTrue(data["imageUrl"].endswith(f"/api/products/{p.pk}/image/"))
+        self.assertTrue(data["imageUrl"].endswith(f"/api/products/{p.pk}/image/?v=SERVE.jpg"))
         response = self.client.get(f"/api/products/{p.pk}/image/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(b"".join(response.streaming_content), b"\xff\xd8fake-jpeg")
