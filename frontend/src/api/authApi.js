@@ -1,15 +1,7 @@
 import { USE_MOCK, request, delay, ApiError } from './client';
 import { ROLES } from '../constants/roles';
 
-/**
- * Backend contract:
- *   POST /auth/register  { name, email, password, taxId, homeAddress } -> { user, accessToken }
- *   POST /auth/login     { email, password }                          -> { user, accessToken }
- *   POST /auth/logout
- *   GET  /auth/me                                                      -> { user }
- * Password hashing (bcrypt/argon2) is the BACKEND's job; the frontend only sends the password over HTTPS.
- */
-
+// Real backend uses JWT access/refresh tokens; profile is fetched from /auth/me/.
 // Demo users — mock mode only. One per role for testing.
 const demoUsers = [
   { id: 1, name: 'Alice Customer', email: 'customer@demo.com', role: ROLES.CUSTOMER, taxId: '11111111111', homeAddress: 'Kadıköy, Istanbul' },
@@ -26,7 +18,10 @@ export async function login({ email, password }) {
     if (!user || password !== DEMO_PASSWORD) throw new ApiError('Incorrect email or password', 401);
     return { user, accessToken: `mock-token-${user.id}` };
   }
-  return request('/auth/login', { method: 'POST', body: { email, password } });
+  const tokens = await request('/auth/login/', { method: 'POST', body: { email, password } });
+  // Fetch the profile using the newly issued access token.
+  const user = await request('/auth/me/', { headers: { Authorization: `Bearer ${tokens.access}` }, retry: false });
+  return { user, accessToken: tokens.access, refreshToken: tokens.refresh };
 }
 
 export async function register(payload) {
@@ -41,10 +36,12 @@ export async function register(payload) {
     demoUsers.push(user);
     return { user, accessToken: `mock-token-${user.id}` };
   }
-  return request('/auth/register', { method: 'POST', body: payload });
+  const data = await request('/auth/register/', { method: 'POST', body: payload });
+  return { user: data.user, accessToken: data.access, refreshToken: data.refresh };
 }
 
 export async function logout() {
   if (USE_MOCK) return;
-  return request('/auth/logout', { method: 'POST' });
+  const session = JSON.parse(sessionStorage.getItem('ml_session') || 'null');
+  return request('/auth/logout/', { method: 'POST', body: { refresh: session?.refreshToken } });
 }

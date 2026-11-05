@@ -32,7 +32,7 @@ export function filterAndSort(list, { q = '', category = '', brand = '', family 
 export async function getProducts(params = {}) {
   if (USE_MOCK) { await delay(); return filterAndSort(mockProducts, params); }
   const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString();
-  return request(`/products${qs ? `?${qs}` : ''}`);
+  return request(`/products/${qs ? `?${qs}` : ''}`);
 }
 
 export async function getProduct(id) {
@@ -42,12 +42,12 @@ export async function getProduct(id) {
     if (!p) throw new Error('Product not found');
     return p;
   }
-  return request(`/products/${encodeURIComponent(id)}`);
+  return request(`/products/${encodeURIComponent(id)}/`);
 }
 
 export async function getCategories() {
   if (USE_MOCK) return CATEGORIES;
-  return request('/categories');
+  return request('/categories/');
 }
 
 export const getBrands = (list) => [...new Set(list.map((p) => p.brand))].sort();
