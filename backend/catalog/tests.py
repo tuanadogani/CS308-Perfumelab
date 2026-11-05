@@ -116,3 +116,79 @@ class ProductApiTests(APITestCase):
         self.assertEqual(self.client.get(f"/api/products/{pid}/").status_code, 200)
         self.assertEqual(self.client.get("/api/products/999999/").status_code, 404)
         self.assertEqual(len(self.client.get("/api/categories/").json()), 4)
+
+
+class ProductImageTests(APITestCase):
+    """Photos live in catalog/product_images/<serial>.jpg; a temp folder stands in for it here."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        patcher = mock.patch("catalog.images.IMAGE_DIR", self.dir)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _photo(self, name):
+        (self.dir / name).write_bytes(b"\xff\xd8fake-jpeg")
+
+    def test_image_path_finds_existing_photo(self):
+        from .images import image_path
+        self._photo("A.jpg")
+        self.assertEqual(image_path("A.jpg"), self.dir / "A.jpg")
+
+    def test_image_path_blocks_folder_tricks(self):
+        from .images import image_path
+        self._photo("A.jpg")
+        # "../" is thrown away, so only a file directly inside the photo folder can match.
+        self.assertEqual(image_path("../../A.jpg"), self.dir / "A.jpg")
+        self.assertIsNone(image_path("../../config/settings.py"))
+
+    def test_image_path_rejects_wrong_type_missing_or_blank(self):
+        from .images import image_path
+        self._photo("notes.txt")
+        self.assertIsNone(image_path("notes.txt"))
+        self.assertIsNone(image_path("missing.jpg"))
+        self.assertIsNone(image_path(""))
+
+    def test_link_command_links_only_products_with_a_file(self):
+        with_photo = make_product(serial_number="HAS-PHOTO")
+        without = make_product(serial_number="NO-PHOTO")
+        self._photo("HAS-PHOTO.jpg")
+        out = StringIO()
+        call_command("link_product_images", stdout=out)
+        with_photo.refresh_from_db()
+        without.refresh_from_db()
+        self.assertEqual(with_photo.image, "HAS-PHOTO.jpg")
+        self.assertEqual(without.image, "")
+        self.assertIn("no photo yet", out.getvalue())
+
+    def test_link_is_safe_to_rerun(self):
+        from .images import link_images
+        make_product(serial_number="TWICE")
+        self._photo("TWICE.jpg")
+        self.assertEqual(link_images(Product.objects.all()), 1)
+        self.assertEqual(link_images(Product.objects.all()), 0)
+
+    def test_api_gives_image_url_and_serves_the_file(self):
+        p = make_product(serial_number="SERVE", image="SERVE.jpg")
+        self._photo("SERVE.jpg")
+        data = self.client.get(f"/api/products/{p.pk}/").json()
+        self.assertTrue(data["imageUrl"].endswith(f"/api/products/{p.pk}/image/"))
+        response = self.client.get(f"/api/products/{p.pk}/image/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), b"\xff\xd8fake-jpeg")
+
+    def test_no_photo_means_null_url_and_404(self):
+        p = make_product()
+        self.assertIsNone(self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"])
+        self.assertEqual(self.client.get(f"/api/products/{p.pk}/image/").status_code, 404)
+
+    def test_inactive_product_image_is_hidden(self):
+        p = make_product(serial_number="GONE", image="GONE.jpg", active=False)
+        self._photo("GONE.jpg")
+        self.assertEqual(self.client.get(f"/api/products/{p.pk}/image/").status_code, 404)

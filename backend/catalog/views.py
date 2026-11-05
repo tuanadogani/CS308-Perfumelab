@@ -1,7 +1,11 @@
 from django.db.models import Avg
+from django.http import FileResponse, Http404
+from django.shortcuts import get_object_or_404
+from django.views import View
 from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.permissions import AllowAny
 
+from .images import image_path
 from .models import Category, Product
 from .selectors import search_products
 from .serializers import CategorySerializer, ProductSerializer
@@ -44,3 +48,16 @@ class CategoryList(ListAPIView):
     serializer_class = CategorySerializer
     queryset = Category.objects.all()
     pagination_class = None
+
+
+class ProductImage(View):
+    """GET /api/products/<id>/image/ - the perfume's photo (public, like the catalog)."""
+
+    def get(self, request, pk):
+        product = get_object_or_404(Product, pk=pk, active=True)
+        path = image_path(product.image)
+        if path is None:
+            raise Http404("No image for this product.")
+        response = FileResponse(open(path, "rb"))
+        response["Cache-Control"] = "public, max-age=86400"
+        return response
