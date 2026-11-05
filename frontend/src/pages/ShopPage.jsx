@@ -9,6 +9,7 @@ export default function ShopPage() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [options, setOptions] = useState({ brands: [], families: [] });
+  const [brandPool, setBrandPool] = useState([]); // products matching every filter except brand
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState(params.get('q') ?? '');
@@ -17,13 +18,24 @@ export default function ShopPage() {
     q: params.get('q') ?? '',
     category: params.get('category') ?? '',
     brand: params.get('brand') ?? '',
-    family: params.get('family') ?? '',
+    family: params.getAll('family'),
     sort: params.get('sort') ?? 'popularity',
   }), [params]);
 
   const setFilter = (key, value) => {
     const next = new URLSearchParams(params);
     value ? next.set(key, value) : next.delete(key);
+    setParams(next, { replace: true });
+  };
+
+  // Toggle one scent family; products must match every selected family
+  const toggleFamily = (family) => {
+    const next = new URLSearchParams(params);
+    const selected = filters.family.includes(family)
+      ? filters.family.filter((f) => f !== family)
+      : [...filters.family, family];
+    next.delete('family');
+    selected.forEach((f) => next.append('family', f));
     setParams(next, { replace: true });
   };
 
@@ -40,6 +52,19 @@ export default function ShopPage() {
     return () => { cancelled = true; };
   }, [filters]);
 
+  // While a brand is selected, the product list only holds that brand. To still offer the
+  // other brands that match the remaining filters, load the list without the brand filter.
+  const familyKey = filters.family.join('|');
+  useEffect(() => {
+    if (!filters.brand) return undefined;
+    let cancelled = false;
+    getProducts({ q: filters.q, category: filters.category, family: filters.family })
+      .then((list) => { if (!cancelled) setBrandPool(list); })
+      .catch(() => { if (!cancelled) setBrandPool([]); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.brand, filters.q, filters.category, familyKey]);
+
   // Search box: 300 ms debounce so we don't send a request on every keystroke
   useEffect(() => {
     const t = setTimeout(() => { if (search !== filters.q) setFilter('q', search); }, 300);
@@ -47,9 +72,20 @@ export default function ShopPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
-  const brands = options.brands.map((b) => b.name);
-  const families = options.families.map((f) => f.name);
-  const hasFilters = filters.q || filters.category || filters.brand || filters.family;
+  // Only offer options that still return results. Selected options always stay visible
+  // so they can be cleared.
+  const brands = useMemo(() => {
+    const present = new Set((filters.brand ? brandPool : products).map((p) => p.brand));
+    return options.brands.map((b) => b.name).filter((b) => present.has(b) || b === filters.brand);
+  }, [options.brands, products, brandPool, filters.brand]);
+  // Selected families are combined with AND, so a family is available when at least
+  // one listed product has it.
+  const families = useMemo(() => {
+    const present = new Set(products.flatMap((p) => p.families ?? []));
+    return options.families.map((f) => f.name)
+      .filter((f) => present.has(f) || filters.family.includes(f));
+  }, [options.families, products, filters.family]);
+  const hasFilters = filters.q || filters.category || filters.brand || filters.family.length > 0;
 
   return (
     <div className="container shop">
@@ -82,8 +118,8 @@ export default function ShopPage() {
           <h4>Scent Family</h4>
           <div className="chips">
             {families.map((f) => (
-              <button key={f} className={`chip ${filters.family === f ? 'active' : ''}`}
-                onClick={() => setFilter('family', filters.family === f ? '' : f)}>{f}</button>
+              <button key={f} className={`chip ${filters.family.includes(f) ? 'active' : ''}`}
+                aria-pressed={filters.family.includes(f)} onClick={() => toggleFamily(f)}>{f}</button>
             ))}
           </div>
 

@@ -44,7 +44,7 @@ Base URL: `http://127.0.0.1:8000`
 - `GET /api/health/` — check the database connection.
 - `POST /api/auth/register/` — register with `{name, email, password, taxId, homeAddress}`; returns `{user, access, refresh}`.
 - `POST /api/auth/logout/` — blacklist `{refresh}`; requires an access token.
-- `GET /api/products/` — public catalog; supports `q, category, brand, family, sort`.
+- `GET /api/products/` — public catalog; supports `q, category, brand, family, sort`. Repeat `family` to require several scent families (AND).
 - `GET /api/products/<id>/` — public product detail.
 - `GET /api/categories/` — public categories.
 - `POST /api/auth/login/` — log in and get access and refresh tokens.

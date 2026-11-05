@@ -8,7 +8,7 @@ from django.test import TestCase
 from rest_framework.test import APITestCase
 
 from .factories import make_product
-from .models import Product
+from .models import NoteFamily, Product
 from .selectors import search_products
 
 
@@ -78,6 +78,18 @@ class SearchTests(TestCase):
     def test_sort_by_popularity_is_default(self):
         self.assertEqual(self.names(), ["Cedar Noir", "Citrus Day", "Rose Velours"])
 
+    def test_single_family_filter(self):
+        self.tag(woody=[self.cedar, self.rose], floral=[self.rose, self.citrus])
+        self.assertCountEqual(self.names(family="Woody"), ["Cedar Noir", "Rose Velours"])
+
+    def test_multiple_families_require_all(self):
+        self.tag(woody=[self.cedar, self.rose], floral=[self.rose, self.citrus])
+        self.assertEqual(self.names(family=["Woody", "Floral"]), ["Rose Velours"])
+
+    def tag(self, woody, floral):
+        NoteFamily.objects.create(name="Woody").products.set(woody)
+        NoteFamily.objects.create(name="Floral").products.set(floral)
+
 
 class ProductApiTests(APITestCase):
     @classmethod
@@ -116,6 +128,18 @@ class ProductApiTests(APITestCase):
         self.assertEqual(self.client.get(f"/api/products/{pid}/").status_code, 200)
         self.assertEqual(self.client.get("/api/products/999999/").status_code, 404)
         self.assertEqual(len(self.client.get("/api/categories/").json()), 4)
+
+    def test_filter_by_brand(self):
+        data = self.client.get("/api/products/?brand=Dior").json()
+        self.assertEqual(len(data), 3)
+        self.assertTrue(all(p["brand"] == "Dior" for p in data))
+
+    def test_multiple_families_are_combined_with_and(self):
+        data = self.client.get("/api/products/?family=Woody&family=Spicy").json()
+        self.assertTrue(data)
+        self.assertTrue(all({"Woody", "Spicy"} <= set(p["families"]) for p in data))
+        single = self.client.get("/api/products/?family=Woody").json()
+        self.assertLess(len(data), len(single))
 
 
 class ProductImageTests(APITestCase):

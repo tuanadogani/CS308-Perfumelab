@@ -23,7 +23,10 @@ def _products():
 
 
 class ProductList(ListAPIView):
-    """GET /api/products/?q=&category=&brand=&family=&sort=price_asc|price_desc|popularity"""
+    """GET /api/products/?q=&category=&brand=&family=&family=&sort=price_asc|price_desc|popularity
+
+    Repeat `family` to require several scent families at once (AND).
+    """
 
     permission_classes = [AllowAny]
     serializer_class = ProductSerializer
@@ -33,7 +36,7 @@ class ProductList(ListAPIView):
         p = self.request.query_params
         return search_products(
             _products(), p.get("q", ""), p.get("category", ""), p.get("brand", ""),
-            p.get("family", ""), p.get("sort", "popularity"),
+            p.getlist("family"), p.get("sort", "popularity"),
         )
 
 
