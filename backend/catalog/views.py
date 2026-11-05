@@ -1,11 +1,15 @@
 from django.db.models import Avg
+from django.http import FileResponse, Http404
+from django.shortcuts import get_object_or_404
+from django.views import View
 from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Brand, Category, NoteFamily, Product
-from .selectors import search_products
+from .images import image_path
+from .models import Category, Product
+from .selectors import filter_options, search_products
 from .serializers import CategorySerializer, ProductSerializer
 
 
@@ -51,33 +55,23 @@ class CategoryList(ListAPIView):
     pagination_class = None
 
 
-class BrandList(APIView):
-    """GET /api/brands/?q=&category=&family=&family=
+class ProductImage(View):
+    """GET /api/products/<id>/image/ - the perfume's photo (public, like the catalog)."""
 
-    Names of brands that have at least one active product matching the given
-    filters, so the shop only offers brands that return results.
-    """
-
-    permission_classes = [AllowAny]
-
-    def get(self, request):
-        p = request.query_params
-        matching = search_products(
-            Product.objects.filter(active=True), p.get("q", ""), p.get("category", ""), "",
-            p.getlist("family"),
-        )
-        names = (
-            Brand.objects.filter(products__in=matching.order_by().values("pk"))
-            .distinct().values_list("name", flat=True)
-        )
-        return Response(sorted(names))
+    def get(self, request, pk):
+        product = get_object_or_404(Product, pk=pk, active=True)
+        path = image_path(product.image)
+        if path is None:
+            raise Http404("No image for this product.")
+        response = FileResponse(open(path, "rb"))
+        response["Cache-Control"] = "public, max-age=86400"
+        return response
 
 
-class FamilyList(APIView):
-    """GET /api/families/ - scent families used by at least one active product."""
+class FilterOptions(APIView):
+    """GET /api/filters/ - brands, scent families and categories (with product counts) for the shop sidebar."""
 
     permission_classes = [AllowAny]
 
     def get(self, request):
-        names = NoteFamily.objects.filter(products__active=True).distinct().values_list("name", flat=True)
-        return Response(sorted(names))
+        return Response(filter_options())
