@@ -52,3 +52,72 @@ class CartTests(TestCase):
         add_to_cart(cart, make_product(price="100.00"), 2)
         add_to_cart(cart, make_product(price="50.00"), 1)
         self.assertEqual(cart.total, 250)
+
+
+class CartEditTests(TestCase):
+    """Changing, removing and emptying cart lines, plus finding the right cart."""
+
+    def setUp(self):
+        from .services import get_cart
+        self.user = make_user()
+        self.cart = get_cart(user=self.user)
+
+    def test_get_cart_creates_once_per_user(self):
+        from .services import get_cart
+        self.assertEqual(get_cart(user=self.user).pk, self.cart.pk)
+        self.assertEqual(Cart.objects.filter(user=self.user).count(), 1)
+
+    def test_get_cart_for_guest_uses_session_key(self):
+        from django.contrib.auth.models import AnonymousUser
+        from .services import get_cart
+        guest = get_cart(user=AnonymousUser(), session_key="abc123")
+        self.assertEqual(guest.session_key, "abc123")
+        self.assertEqual(get_cart(session_key="abc123").pk, guest.pk)
+
+    def test_guest_without_session_key_is_rejected(self):
+        from .services import get_cart
+        with self.assertRaises(ValidationError):
+            get_cart()
+
+    def test_set_quantity_changes_line(self):
+        from .services import set_quantity
+        p = make_product(stock=5)
+        add_to_cart(self.cart, p, 1)
+        self.assertEqual(set_quantity(self.cart, p, 4).quantity, 4)
+
+    def test_set_quantity_capped_at_stock(self):
+        from .services import set_quantity
+        p = make_product(stock=3)
+        self.assertEqual(set_quantity(self.cart, p, 10).quantity, 3)
+
+    def test_set_quantity_zero_removes_line(self):
+        from .services import set_quantity
+        p = make_product(stock=3)
+        add_to_cart(self.cart, p, 2)
+        self.assertIsNone(set_quantity(self.cart, p, 0))
+        self.assertFalse(self.cart.items.exists())
+
+    def test_set_quantity_rejects_negative_and_sold_out(self):
+        from .services import set_quantity
+        with self.assertRaises(ValidationError):
+            set_quantity(self.cart, make_product(stock=3), -1)
+        with self.assertRaises(ValidationError):
+            set_quantity(self.cart, make_product(stock=0), 1)
+
+    def test_remove_and_clear(self):
+        from .services import clear_cart, remove_from_cart
+        a, b = make_product(), make_product()
+        add_to_cart(self.cart, a)
+        add_to_cart(self.cart, b)
+        remove_from_cart(self.cart, a)
+        self.assertEqual(list(self.cart.items.values_list("product_id", flat=True)), [b.pk])
+        clear_cart(self.cart)
+        self.assertFalse(self.cart.items.exists())
+
+    def test_cart_lines_loads_products_in_one_query(self):
+        from .services import cart_lines
+        for _ in range(3):
+            add_to_cart(self.cart, make_product())
+        with self.assertNumQueries(1):
+            names = [line.product.brand.name for line in cart_lines(self.cart)]
+        self.assertEqual(len(names), 3)
