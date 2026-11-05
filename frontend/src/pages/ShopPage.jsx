@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ProductCard from '../components/ProductCard';
-import { getProducts, getCategories, getBrands } from '../api/productApi';
-import { products as allMock, NOTE_FAMILIES } from '../mocks/products';
+import { getProducts, getCategories, getFilters } from '../api/productApi';
 
 // Requirements 1 & 7: categories, search (name/description), sort by price/popularity, brand & note filters
 export default function ShopPage() {
   const [params, setParams] = useSearchParams(); // filters live in the URL → shareable links, back button works
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [options, setOptions] = useState({ brands: [], families: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState(params.get('q') ?? '');
@@ -28,6 +28,7 @@ export default function ShopPage() {
   };
 
   useEffect(() => { getCategories().then(setCategories); }, []);
+  useEffect(() => { getFilters().then(setOptions).catch(() => {}); }, []); // sidebar still works without them
 
   useEffect(() => {
     let cancelled = false;
@@ -46,7 +47,8 @@ export default function ShopPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
-  const brands = getBrands(allMock); // Sprint 2: GET /brands
+  const brands = options.brands.map((b) => b.name);
+  const families = options.families.map((f) => f.name);
   const hasFilters = filters.q || filters.category || filters.brand || filters.family;
 
   return (
@@ -79,7 +81,7 @@ export default function ShopPage() {
 
           <h4>Scent Family</h4>
           <div className="chips">
-            {NOTE_FAMILIES.map((f) => (
+            {families.map((f) => (
               <button key={f} className={`chip ${filters.family === f ? 'active' : ''}`}
                 onClick={() => setFilter('family', filters.family === f ? '' : f)}>{f}</button>
             ))}

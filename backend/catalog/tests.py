@@ -254,3 +254,12 @@ class FilterOptionsTests(TestCase):
         make_product(brand="Gone", active=False)
         make_product(brand="Here")
         self.assertEqual([b["name"] for b in filter_options()["brands"]], ["Here"])
+
+
+class FilterOptionsApiTests(APITestCase):
+    def test_filters_endpoint_is_public_and_lists_db_brands(self):
+        make_product(brand="Brand From Database")
+        response = self.client.get("/api/filters/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn({"name": "Brand From Database", "count": 1}, response.json()["brands"])
+        self.assertEqual(set(response.json()), {"brands", "families", "categories"})
