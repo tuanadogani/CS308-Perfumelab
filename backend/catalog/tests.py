@@ -167,6 +167,18 @@ class ProductImageTests(APITestCase):
         self.assertEqual(without.image, "")
         self.assertIn("no photo yet", out.getvalue())
 
+    def test_link_clears_name_when_photo_file_is_gone(self):
+        from .images import link_images
+        stale = make_product(serial_number="DELETED", image="DELETED.png")  # no file on disk
+        self.assertEqual(link_images(Product.objects.filter(pk=stale.pk)), 1)  # counted as a change
+        stale.refresh_from_db()
+        self.assertEqual(stale.image, "")
+
+    def test_missing_file_gives_null_image_url(self):
+        # Even before anyone re-runs the link command, the API must not hand out a broken link.
+        p = make_product(serial_number="VANISHED", image="VANISHED.jpg")
+        self.assertIsNone(self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"])
+
     def test_link_is_safe_to_rerun(self):
         from .images import link_images
         make_product(serial_number="TWICE")
@@ -190,6 +202,7 @@ class ProductImageTests(APITestCase):
         p = make_product(serial_number="SWAP", image="SWAP.jpg")
         self._photo("SWAP.jpg")
         before = self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"]
+        self._photo("SWAP.png")
         p.image = "SWAP.png"
         p.save(update_fields=["image"])
         after = self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"]
@@ -241,3 +254,12 @@ class FilterOptionsTests(TestCase):
         make_product(brand="Gone", active=False)
         make_product(brand="Here")
         self.assertEqual([b["name"] for b in filter_options()["brands"]], ["Here"])
+
+
+class FilterOptionsApiTests(APITestCase):
+    def test_filters_endpoint_is_public_and_lists_db_brands(self):
+        make_product(brand="Brand From Database")
+        response = self.client.get("/api/filters/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn({"name": "Brand From Database", "count": 1}, response.json()["brands"])
+        self.assertEqual(set(response.json()), {"brands", "families", "categories"})

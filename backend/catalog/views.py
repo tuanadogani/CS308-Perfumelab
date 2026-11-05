@@ -4,10 +4,12 @@ from django.shortcuts import get_object_or_404
 from django.views import View
 from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .images import image_path
 from .models import Category, Product
-from .selectors import search_products
+from .selectors import filter_options, search_products
 from .serializers import CategorySerializer, ProductSerializer
 
 
@@ -61,3 +63,12 @@ class ProductImage(View):
         response = FileResponse(open(path, "rb"))
         response["Cache-Control"] = "public, max-age=86400"
         return response
+
+
+class FilterOptions(APIView):
+    """GET /api/filters/ - brands, scent families and categories (with product counts) for the shop sidebar."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response(filter_options())

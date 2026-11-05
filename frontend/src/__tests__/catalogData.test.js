@@ -17,3 +17,16 @@ describe('cart keeps the product photo', () => {
     expect(s.items[0].quantity).toBe(2);
   });
 });
+
+describe('shop filter options', () => {
+  it('loads brands and families from GET /api/filters/', async () => {
+    const { vi } = await import('vitest');
+    const { getFilters } = await import('../api/productApi');
+    const data = { brands: [{ name: 'Dior', count: 3 }], families: [{ name: 'Woody', count: 5 }], categories: [] };
+    const fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => data });
+    vi.stubGlobal('fetch', fetch);
+    expect(await getFilters()).toEqual(data);
+    expect(fetch.mock.calls[0][0]).toBe('/api/filters/');
+    vi.unstubAllGlobals();
+  });
+});

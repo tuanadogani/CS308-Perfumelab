@@ -1,11 +1,12 @@
 import { USE_MOCK, request, delay } from './client';
-import { products as mockProducts, CATEGORIES } from '../mocks/products';
+import { products as mockProducts, CATEGORIES, NOTE_FAMILIES } from '../mocks/products';
 
 /**
  * Backend contract (share with the team):
  *   GET /products?q=&category=&brand=&family=&sort=price_asc|price_desc|popularity
  *   GET /products/:id
  *   GET /categories
+ *   GET /filters  -> { brands: [{name, count}], families: [{name, count}], categories: [...] }
  */
 
 export function filterAndSort(list, { q = '', category = '', brand = '', family = '', sort = 'popularity' } = {}) {
@@ -51,3 +52,16 @@ export async function getCategories() {
 }
 
 export const getBrands = (list) => [...new Set(list.map((p) => p.brand))].sort();
+
+// Sidebar filter options. Real mode reads them from the database, so newly added
+// brands and scent families show up without touching the frontend.
+export async function getFilters() {
+  if (USE_MOCK) {
+    return {
+      brands: getBrands(mockProducts).map((name) => ({ name })),
+      families: NOTE_FAMILIES.map((name) => ({ name })),
+      categories: CATEGORIES,
+    };
+  }
+  return request('/filters/');
+}
