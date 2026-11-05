@@ -1,15 +1,21 @@
 import { USE_MOCK, request, delay } from './client';
-import { products as mockProducts, CATEGORIES } from '../mocks/products';
+import { products as mockProducts, CATEGORIES, NOTE_FAMILIES } from '../mocks/products';
 
 /**
  * Backend contract (share with the team):
- *   GET /products?q=&category=&brand=&family=&sort=price_asc|price_desc|popularity
+ *   GET /products?q=&category=&brand=&family=&family=&sort=price_asc|price_desc|popularity
+ *       (repeat `family` to require every selected scent family)
  *   GET /products/:id
  *   GET /categories
+ *   GET /brands?q=&category=&family=  -> ["Chanel", "Dior", ...] (only brands with matching products)
+ *   GET /families   -> ["Aromatic", "Citrus", ...]
  */
 
-export function filterAndSort(list, { q = '', category = '', brand = '', family = '', sort = 'popularity' } = {}) {
+const toList = (value) => (Array.isArray(value) ? value : [value]).filter(Boolean);
+
+export function filterAndSort(list, { q = '', category = '', brand = '', family = [], sort = 'popularity' } = {}) {
   const term = q.trim().toLowerCase();
+  const families = toList(family);
   const out = list.filter((p) => {
     // Requirement 7: search by name OR description. Out-of-stock products are still listed.
     const matchesQ = !term ||
@@ -19,7 +25,7 @@ export function filterAndSort(list, { q = '', category = '', brand = '', family 
     return matchesQ &&
       (!category || p.category === category) &&
       (!brand || p.brand === brand) &&
-      (!family || p.families?.includes(family));
+      families.every((f) => p.families?.includes(f));
   });
   const sorters = {
     price_asc: (a, b) => a.price - b.price,
@@ -29,10 +35,17 @@ export function filterAndSort(list, { q = '', category = '', brand = '', family 
   return [...out].sort(sorters[sort] ?? sorters.popularity);
 }
 
+// Repeated keys for arrays: { family: ['Woody', 'Spicy'] } -> ?family=Woody&family=Spicy
+function toQuery(params) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => toList(value).forEach((v) => search.append(key, v)));
+  const qs = search.toString();
+  return qs ? `?${qs}` : '';
+}
+
 export async function getProducts(params = {}) {
   if (USE_MOCK) { await delay(); return filterAndSort(mockProducts, params); }
-  const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString();
-  return request(`/products/${qs ? `?${qs}` : ''}`);
+  return request(`/products/${toQuery(params)}`);
 }
 
 export async function getProduct(id) {
@@ -51,3 +64,14 @@ export async function getCategories() {
 }
 
 export const getBrands = (list) => [...new Set(list.map((p) => p.brand))].sort();
+
+// Brands that still return results for the other active filters (the brand filter itself is ignored)
+export async function getBrandList({ q = '', category = '', family = [] } = {}) {
+  if (USE_MOCK) return getBrands(filterAndSort(mockProducts, { q, category, family }));
+  return request(`/brands/${toQuery({ q, category, family })}`);
+}
+
+export async function getFamilies() {
+  if (USE_MOCK) return [...NOTE_FAMILIES].sort();
+  return request('/families/');
+}
