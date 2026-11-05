@@ -1,16 +1,15 @@
-import { createContext, useContext, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import * as authApi from '../api/authApi';
 import { setAccessToken } from '../api/client';
 
 const AuthContext = createContext(null);
 const SESSION_KEY = 'ml_session';
 
-// Sprint 1: the session is kept in sessionStorage (cleared when the tab closes).
-// Recommended with the real backend: refresh token in an httpOnly cookie, restore the session with GET /auth/me on load.
+// JWT session is scoped to this tab. Expired access tokens are refreshed by the API client.
 function loadSession() {
   try {
     const s = JSON.parse(sessionStorage.getItem(SESSION_KEY));
-    if (s?.user) { setAccessToken(s.accessToken); return s.user; }
+    if (s?.user && s.accessToken) { setAccessToken(s.accessToken); return s.user; }
   } catch { /* ignore */ }
   return null;
 }
@@ -18,9 +17,15 @@ function loadSession() {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(loadSession);
 
-  const startSession = ({ user, accessToken }) => {
+  useEffect(() => {
+    const expire = () => setUser(null);
+    window.addEventListener('auth:expired', expire);
+    return () => window.removeEventListener('auth:expired', expire);
+  }, []);
+
+  const startSession = ({ user, accessToken, refreshToken }) => {
     setAccessToken(accessToken);
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ user, accessToken }));
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ user, accessToken, refreshToken }));
     setUser(user);
     return user;
   };
