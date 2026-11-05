@@ -1,3 +1,6 @@
+from urllib.parse import quote
+
+from django.urls import reverse
 from rest_framework import serializers
 
 from .models import Category, Product
@@ -26,13 +29,14 @@ class ProductSerializer(serializers.ModelSerializer):
     price = serializers.FloatField()
     originalPrice = serializers.FloatField(source="base_price")
     discountRate = serializers.FloatField(source="discount_rate")
+    imageUrl = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
         fields = [
             "id", "name", "brand", "model", "serialNumber", "description", "category", "gender",
             "volumeMl", "notes", "families", "stock", "inStock", "price", "originalPrice",
-            "discountRate", "warrantyStatus", "distributor", "popularity", "rating",
+            "discountRate", "warrantyStatus", "distributor", "popularity", "rating", "imageUrl",
         ]
 
     def get_notes(self, obj):
@@ -40,6 +44,16 @@ class ProductSerializer(serializers.ModelSerializer):
         for note in obj.notes.all():
             grouped[note.tier].append(note.name)
         return grouped
+
+    def get_imageUrl(self, obj):
+        # Absolute URL because the React app runs on another port than Django.
+        if not obj.image:
+            return None
+        # ?v=<file name>: a new photo gets a new address, so browsers don't keep showing
+        # the old one from their cache (the image endpoint is cached for a day).
+        path = f'{reverse("product-image", args=[obj.pk])}?v={quote(obj.image)}'
+        request = self.context.get("request")
+        return request.build_absolute_uri(path) if request else path
 
     def get_rating(self, obj):
         average = getattr(obj, "avg_rating", None)
