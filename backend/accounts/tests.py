@@ -75,3 +75,33 @@ class LoginTests(APITestCase):
         for _ in range(10):
             self.assertEqual(self.login(email="invalid").status_code, 400)
         self.assertEqual(self.login().status_code, 429)
+
+
+class RegistrationTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.payload = {"name": "New Customer", "email": "NEW@example.com",
+                        "password": "TestPassword!2026", "taxId": "12345678901",
+                        "homeAddress": "Kadikoy, Istanbul", "role": "product_manager"}
+
+    def test_register_profile_and_logout(self):
+        response = self.client.post("/api/auth/register/", self.payload, format="json")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["user"]["role"], "customer")
+        self.assertNotIn("password", response.data["user"])
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access']}")
+        profile = self.client.get("/api/auth/me/").data
+        self.assertEqual(profile["name"], self.payload["name"])
+        self.assertEqual(profile["taxId"], self.payload["taxId"])
+        self.assertEqual(profile["homeAddress"], self.payload["homeAddress"])
+        logout = self.client.post("/api/auth/logout/", {"refresh": response.data["refresh"]}, format="json")
+        self.assertEqual(logout.status_code, 204)
+        self.client.credentials()
+        refreshed = self.client.post("/api/auth/refresh/", {"refresh": response.data["refresh"]}, format="json")
+        self.assertEqual(refreshed.status_code, 401)
+
+    def test_duplicate_email_and_weak_password(self):
+        User.objects.create_user("new@example.com", "TestPassword!2026")
+        self.assertEqual(self.client.post("/api/auth/register/", self.payload, format="json").status_code, 400)
+        self.payload.update(email="other@example.com", password="123")
+        self.assertEqual(self.client.post("/api/auth/register/", self.payload, format="json").status_code, 400)
