@@ -1,16 +1,16 @@
 # Maison Lumière — Frontend (CS 308, Sprint 1)
 
-React 18 + Vite + React Router. Runs on **mock data** until the backend is ready.
+React 18 + Vite + React Router. Uses the Django backend by default. Optional mock mode is available with `VITE_USE_MOCK=true`.
 
 ## Getting started
 ```bash
 npm install
-cp .env.example .env      # VITE_USE_MOCK=true   (Windows: copy .env.example .env)
+cp .env.example .env      # VITE_USE_MOCK=false   (Windows: copy .env.example .env)
 npm run dev               # http://localhost:5173
 npm test                  # unit tests (vitest)
 ```
 
-Demo accounts (mock mode, password `Demo1234`):
+Demo accounts (mock mode, or after backend `seed_demo_users`; password `Demo1234`):
 `customer@demo.com`, `sales@demo.com`, `product@demo.com`, `support@demo.com`
 
 ## Folder structure
@@ -39,30 +39,32 @@ src/
 | `/profile` | Name, email, address | Logged in |
 | `/admin` | Role-specific admin modules (skeleton) | Staff roles |
 
-## Contract with the backend team
-Set `VITE_USE_MOCK=false` in `.env` and requests go to `/api` (Vite proxy → `localhost:8000`).
+## Backend connection
 
-| Method | Endpoint | Body / Query | Returns |
-|---|---|---|---|
-| GET | `/products` | `q, category, brand, family, sort=price_asc\|price_desc\|popularity` | `Product[]` |
-| GET | `/products/:id` | | `Product` |
-| GET | `/categories` | | `{id, name}[]` |
-| POST | `/auth/register` | `{name, email, password, taxId, homeAddress}` | `{user, accessToken}` |
-| POST | `/auth/login` | `{email, password}` | `{user, accessToken}` |
-| POST | `/auth/logout` | | |
+Start Django on port 8000 with migrations and seed data applied (see `../backend/README.md`).
+Set `VITE_USE_MOCK=false`; `/api` goes through Vite's proxy. API routes use trailing slashes.
 
-`Product` schema: see the comment at the top of `src/mocks/products.js`.
-`user.role` values: `customer | sales_manager | product_manager | support_agent`.
-On errors the backend should return `{ message: "..." }` with an appropriate HTTP status code.
+| Method | Endpoint | Response |
+|---|---|---|
+| GET | `/products/` | `Product[]`; filters: `q, category, brand, family, sort` |
+| GET | `/products/:id/` | `Product` |
+| GET | `/categories/` | `{id, name}[]` |
+| POST | `/auth/register/` | `{user, access, refresh}` |
+| POST | `/auth/login/` | `{access, refresh}` |
+| GET | `/auth/me/` | `{id, name, email, role, taxId, homeAddress}` |
+| POST | `/auth/refresh/` | `{access, refresh}`; body `{refresh}` |
+| POST | `/auth/logout/` | 204; body `{refresh}` and Bearer access token |
 
-## Security notes (Requirement 17)
-- The role cannot be chosen on the sign-up form; new users are always `customer`.
-- `ProtectedRoute` only protects the UI — **the backend must check authorization on every request**.
-- Password hashing happens on the backend (bcrypt/argon2). The frontend never stores passwords.
-- Recommended: issue the refresh token as an httpOnly cookie and restore the session with `GET /auth/me`.
-- Login errors show a generic message (they don't reveal which field was wrong).
+The auth adapter returns `{user, accessToken, refreshToken}` to React. Tokens live in
+`sessionStorage` until the tab closes. The API client rotates tokens on a 401 and retries once.
+A failed refresh clears the session. Backend validation messages are displayed by the forms.
+New users always receive `customer`; staff roles must be assigned by the backend.
+UI route protection does not replace backend authorization checks.
+
+For production hosting, configure `/api` routing or `VITE_API_BASE_URL`; the Vite development
+proxy is not included in the static build. For cross-origin hosting configure backend CORS origins.
 
 ## Open items for upcoming sprints
 - Merge the guest cart with the backend cart on login (`POST /cart/merge`)
-- Checkout, invoices, order history, wish list, comments/ratings, admin modules
+- Checkout, invoices, order history, comments/ratings, admin modules
 - Real product photos: if a product has an `imageUrl`, `PerfumeBottle` renders an `<img>` automatically
