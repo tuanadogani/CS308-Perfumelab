@@ -135,3 +135,96 @@ class ConcurrencyTests(TransactionTestCase):
         self.assertEqual(results.count("ok"), 1)
         self.assertEqual(product.stock, 0)
         self.assertEqual(Order.objects.count(), 1)
+
+
+from datetime import timedelta
+from django.utils import timezone
+from rest_framework.test import APITestCase
+
+
+class SalesInvoiceApiTests(APITestCase):
+    def setUp(self):
+        self.sales_manager = make_user("sales_manager")
+        self.customer = make_user("customer", name="Ross Geller", tax_id="12345678901")
+        self.product_manager = make_user("product_manager")
+        self.product = make_product(name="Bleu de Chanel", price="1000.00", stock=10)
+        self.order = place_order(self.customer, cart_with(self.customer, self.product, 2))
+        self.invoice = self.order.invoice
+
+    def test_requires_authentication(self):
+        response = self.client.get("/api/sales/invoices/")
+        self.assertEqual(response.status_code, 401)
+        response = self.client.get(f"/api/sales/invoices/{self.invoice.id}/")
+        self.assertEqual(response.status_code, 401)
+        response = self.client.get(f"/api/sales/invoices/{self.invoice.id}/pdf/")
+        self.assertEqual(response.status_code, 401)
+
+    def test_forbidden_for_customers_and_product_managers(self):
+        for user in (self.customer, self.product_manager):
+            self.client.force_authenticate(user)
+            self.assertEqual(self.client.get("/api/sales/invoices/").status_code, 403)
+            self.assertEqual(self.client.get(f"/api/sales/invoices/{self.invoice.id}/").status_code, 403)
+            self.assertEqual(self.client.get(f"/api/sales/invoices/{self.invoice.id}/pdf/").status_code, 403)
+
+    def test_sales_manager_can_list_invoices(self):
+        self.client.force_authenticate(self.sales_manager)
+        response = self.client.get("/api/sales/invoices/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        data = response.data[0]
+        self.assertEqual(data["id"], self.invoice.id)
+        self.assertEqual(data["number"], self.invoice.number)
+        self.assertEqual(data["total"], 2000.0)
+        self.assertEqual(data["customer"]["email"], self.customer.email)
+        self.assertEqual(data["customer"]["taxId"], "12345678901")
+        self.assertEqual(len(data["items"]), 1)
+        self.assertEqual(data["items"][0]["productName"], "Bleu de Chanel")
+        self.assertEqual(data["items"][0]["quantity"], 2)
+
+    def test_filter_invoices_by_date_range(self):
+        self.client.force_authenticate(self.sales_manager)
+        # Create an older order from 10 days ago
+        old_order = place_order(self.customer, cart_with(self.customer, self.product, 1))
+        old_invoice = old_order.invoice
+        ten_days_ago = timezone.now() - timedelta(days=10)
+        old_invoice.__class__.objects.filter(pk=old_invoice.pk).update(issued_at=ten_days_ago)
+
+        today_str = timezone.now().date().isoformat()
+        # Query only today
+        response = self.client.get(f"/api/sales/invoices/?start_date={today_str}&end_date={today_str}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], self.invoice.id)
+
+        # Query camelCase startDate / endDate across the whole range
+        start_str = (timezone.now() - timedelta(days=15)).date().isoformat()
+        response = self.client.get(f"/api/sales/invoices/?startDate={start_str}&endDate={today_str}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+
+    def test_invalid_date_format_returns_400(self):
+        self.client.force_authenticate(self.sales_manager)
+        response = self.client.get("/api/sales/invoices/?start_date=not-a-date")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid date format", response.data["message"])
+
+    def test_retrieve_single_invoice(self):
+        self.client.force_authenticate(self.sales_manager)
+        response = self.client.get(f"/api/sales/invoices/{self.invoice.id}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["number"], self.invoice.number)
+
+    def test_invoice_pdf_view_and_download(self):
+        self.client.force_authenticate(self.sales_manager)
+        # Inline (default for viewing / printing)
+        response = self.client.get(f"/api/sales/invoices/{self.invoice.id}/pdf/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn("inline", response["Content-Disposition"])
+        self.assertTrue(response.content.startswith(b"%PDF"))
+
+        # Attachment (forced download)
+        response = self.client.get(f"/api/sales/invoices/{self.invoice.id}/pdf/?download=true")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("attachment", response["Content-Disposition"])
+
