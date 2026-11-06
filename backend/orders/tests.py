@@ -3,11 +3,13 @@ import threading
 from django.core.exceptions import ValidationError
 from django.db import connection
 from django.test import TestCase, TransactionTestCase
+from reportlab.pdfbase import pdfmetrics
 
 from cart.models import Cart
 from cart.services import add_to_cart
 from catalog.factories import make_product, make_user
 
+from .invoices import FONT, FONT_BOLD, render_invoice_pdf
 from .models import Delivery, Order, OrderStatus
 from .services import advance_status, cancel_order, place_order
 
@@ -319,3 +321,21 @@ class SalesAnalyticsApiTests(APITestCase):
         self.assertIn("start_date cannot be after end_date", response.data["message"])
 
 
+class InvoicePdfTests(TestCase):
+    def setUp(self):
+        self.user = make_user(name="Ayşe Yılmaz", home_address="Çırağan Cd. No:5, Beşiktaş, İstanbul")
+        self.order = place_order(self.user, cart_with(self.user, make_product(stock=5)))
+
+    def test_invoice_fonts_have_turkish_letters(self):
+        render_invoice_pdf(self.order.invoice)
+        for name in (FONT, FONT_BOLD):
+            glyphs = pdfmetrics.getFont(name).face.charToGlyph
+            for ch in "çğıİöşüÇĞÖŞÜ":
+                self.assertIn(ord(ch), glyphs, f"{name} is missing {ch}")
+
+    def test_invoice_embeds_unicode_font(self):
+        self.assertIn(FONT.encode(), render_invoice_pdf(self.order.invoice))
+
+    def test_invoice_render_is_deterministic(self):
+        # the stored SHA-256 only stays valid if every render is byte-identical
+        self.assertEqual(render_invoice_pdf(self.order.invoice), render_invoice_pdf(self.order.invoice))

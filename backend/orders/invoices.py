@@ -1,14 +1,27 @@
 """Invoice PDF: rendered on demand from the database, only its SHA-256 is stored."""
 import hashlib
 import io
+from pathlib import Path
+
 
 from django.core.mail import EmailMessage
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
+# Helvetica has no ş, ğ, ı, İ: Turkish names and addresses came out as black boxes.
+FONT_DIR = Path(__file__).resolve().parent / "fonts"
+FONT, FONT_BOLD = "DejaVuSans", "DejaVuSans-Bold"
+
+def _register_fonts():
+    if FONT not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(FONT, str(FONT_DIR / "DejaVuSans.ttf")))
+        pdfmetrics.registerFont(TTFont(FONT_BOLD, str(FONT_DIR / "DejaVuSans-Bold.ttf")))
 
 def render_invoice_pdf(invoice):
+    _register_fonts()
     order = invoice.order
     buf = io.BytesIO()
     # invariant=1 keeps the file byte-identical between renders, so the stored hash stays valid
@@ -16,10 +29,10 @@ def render_invoice_pdf(invoice):
     width, height = A4
     y = height - 25 * mm
 
-    c.setFont("Helvetica-Bold", 20)
+    c.setFont(FONT_BOLD, 20)
     c.drawString(20 * mm, y, "PerfumeLab - Invoice")
     y -= 10 * mm
-    c.setFont("Helvetica", 10)
+    c.setFont(FONT, 10)
     for line in (
         f"Invoice no: {invoice.number}",
         f"Date: {invoice.issued_at:%Y-%m-%d %H:%M}",
@@ -31,13 +44,13 @@ def render_invoice_pdf(invoice):
         y -= 6 * mm
 
     y -= 6 * mm
-    c.setFont("Helvetica-Bold", 10)
+    c.setFont(FONT_BOLD, 10)
     for x, label in ((20, "Product"), (110, "Qty"), (130, "Unit price"), (165, "Total")):
         c.drawString(x * mm, y, label)
     y -= 2 * mm
     c.line(20 * mm, y, 190 * mm, y)
     y -= 6 * mm
-    c.setFont("Helvetica", 10)
+    c.setFont(FONT, 10)
     for item in order.items.select_related("product__brand"):
         c.drawString(20 * mm, y, f"{item.product.brand.name} {item.product.name} {item.product.volume_ml}ml"[:55])
         c.drawString(110 * mm, y, str(item.quantity))
@@ -47,7 +60,7 @@ def render_invoice_pdf(invoice):
 
     c.line(20 * mm, y, 190 * mm, y)
     y -= 8 * mm
-    c.setFont("Helvetica-Bold", 12)
+    c.setFont(FONT_BOLD, 12)
     c.drawString(130 * mm, y, f"TOTAL: {invoice.total:.2f} TL")
     c.showPage()
     c.save()
