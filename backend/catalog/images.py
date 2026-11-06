@@ -1,10 +1,10 @@
 """Where product photos live on disk and how a photo is found for a perfume.
 
 Each photo is saved as catalog/product_images/<serial_number>.jpg (white background)
-or .png (transparent cut-out, used first when present) and committed to
-git, so a fresh database can get its photos back with
-`python manage.py link_product_images`. Where each photo came from is listed in
-catalog/product_images/SOURCES.md.
+or .png (transparent cut-out, used first when present) and committed to git.
+Product.image can name the photo, but photo_for() also finds it by serial number,
+so photos show on any database without running a command first.
+Where each photo came from is listed in catalog/product_images/SOURCES.md.
 """
 import os
 from pathlib import Path
@@ -36,6 +36,17 @@ def find_photo(serial_number):
         if image_path(serial_number + ext):
             return serial_number + ext
     return ""
+
+
+def photo_for(product):
+    """File name of the photo to show for a product, or "" if there is none.
+
+    The saved name comes first, so a product can use a photo with any file name.
+    If it is empty or its file is gone, look for a photo named after the serial number.
+    """
+    if image_path(product.image):
+        return product.image
+    return find_photo(product.serial_number)
 
 
 def link_images(products):

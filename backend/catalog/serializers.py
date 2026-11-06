@@ -3,7 +3,7 @@ from urllib.parse import quote
 from django.urls import reverse
 from rest_framework import serializers
 
-from .images import image_path
+from .images import photo_for
 from .models import Category, Product
 
 
@@ -48,11 +48,12 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def get_imageUrl(self, obj):
         # Absolute URL because the React app runs on another port than Django.
-        if not obj.image or image_path(obj.image) is None:
-            return None  # no photo, or its file is gone: the frontend draws a bottle instead
+        filename = photo_for(obj)
+        if not filename:
+            return None  # no photo for this product: the frontend draws a bottle instead
         # ?v=<file name>: a new photo gets a new address, so browsers don't keep showing
         # the old one from their cache (the image endpoint is cached for a day).
-        path = f'{reverse("product-image", args=[obj.pk])}?v={quote(obj.image)}'
+        path = f'{reverse("product-image", args=[obj.pk])}?v={quote(filename)}'
         request = self.context.get("request")
         return request.build_absolute_uri(path) if request else path
 

@@ -232,11 +232,45 @@ class ProductImageTests(APITestCase):
         after = self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"]
         self.assertNotEqual(before, after)
 
+    def test_photo_is_found_by_serial_when_nothing_is_linked(self):
+        # A database made before photos existed has an empty image column.
+        # The photo must still show, without anyone running a command.
+        p = make_product(serial_number="NOT-LINKED", image="")
+        self._photo("NOT-LINKED.png")
+        url = self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"]
+        self.assertTrue(url.endswith(f"/api/products/{p.pk}/image/?v=NOT-LINKED.png"))
+        response = self.client.get(f"/api/products/{p.pk}/image/")
+        b"".join(response.streaming_content)  # read it all to release the file
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/png")
+
+    def test_old_file_name_falls_back_to_the_serial_photo(self):
+        # The saved name points at a deleted file, but a photo for this serial exists.
+        p = make_product(serial_number="RENAMED", image="OLD-NAME.jpg")
+        self._photo("RENAMED.png")
+        url = self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"]
+        self.assertTrue(url.endswith("?v=RENAMED.png"))
+
+    def test_saved_file_name_wins_over_the_serial_photo(self):
+        # A product can use a photo with any name; the saved name comes first.
+        p = make_product(serial_number="CHOSEN", image="custom-name.jpg")
+        self._photo("custom-name.jpg")
+        self._photo("CHOSEN.png")
+        url = self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"]
+        self.assertTrue(url.endswith("?v=custom-name.jpg"))
+
+    def test_no_photo_at_all_stays_null_and_404(self):
+        p = make_product(serial_number="NOTHING", image="")
+        self.assertIsNone(self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"])
+        self.assertEqual(self.client.get(f"/api/products/{p.pk}/image/").status_code, 404)
+
     def test_png_is_served_as_png(self):
         p = make_product(serial_number="CUT", image="CUT.png")
         self._photo("CUT.png")
         response = self.client.get(f"/api/products/{p.pk}/image/")
-        response.close()  # release the file, or Windows can't delete the temp folder
+        # Read it all to release the file. Don't call response.close(): that ends the
+        # "request", which closes the database connection for the tests that run next.
+        b"".join(response.streaming_content)
         self.assertEqual(response["Content-Type"], "image/png")
 
     def test_api_gives_image_url_and_serves_the_file(self):
