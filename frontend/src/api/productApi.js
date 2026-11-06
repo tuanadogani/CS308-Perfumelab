@@ -1,15 +1,20 @@
 import { USE_MOCK, request, delay } from './client';
-import { products as mockProducts, CATEGORIES } from '../mocks/products';
+import { products as mockProducts, CATEGORIES, NOTE_FAMILIES } from '../mocks/products';
 
 /**
  * Backend contract (share with the team):
- *   GET /products?q=&category=&brand=&family=&sort=price_asc|price_desc|popularity
+ *   GET /products?q=&category=&brand=&family=&family=&sort=price_asc|price_desc|popularity
+ *       (repeat `family` to require every selected scent family)
  *   GET /products/:id
  *   GET /categories
+ *   GET /filters  -> { brands: [{name, count}], families: [{name, count}], categories: [...] }
  */
 
-export function filterAndSort(list, { q = '', category = '', brand = '', family = '', sort = 'popularity' } = {}) {
+const toList = (value) => (Array.isArray(value) ? value : [value]).filter(Boolean);
+
+export function filterAndSort(list, { q = '', category = '', brand = '', family = [], sort = 'popularity' } = {}) {
   const term = q.trim().toLowerCase();
+  const families = toList(family);
   const out = list.filter((p) => {
     // Requirement 7: search by name OR description. Out-of-stock products are still listed.
     const matchesQ = !term ||
@@ -19,7 +24,7 @@ export function filterAndSort(list, { q = '', category = '', brand = '', family 
     return matchesQ &&
       (!category || p.category === category) &&
       (!brand || p.brand === brand) &&
-      (!family || p.families?.includes(family));
+      families.every((f) => p.families?.includes(f));
   });
   const sorters = {
     price_asc: (a, b) => a.price - b.price,
@@ -31,7 +36,10 @@ export function filterAndSort(list, { q = '', category = '', brand = '', family 
 
 export async function getProducts(params = {}) {
   if (USE_MOCK) { await delay(); return filterAndSort(mockProducts, params); }
-  const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString();
+  // Arrays become repeated keys: { family: ['Woody', 'Spicy'] } -> ?family=Woody&family=Spicy
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => toList(value).forEach((v) => search.append(key, v)));
+  const qs = search.toString();
   return request(`/products/${qs ? `?${qs}` : ''}`);
 }
 
@@ -51,3 +59,16 @@ export async function getCategories() {
 }
 
 export const getBrands = (list) => [...new Set(list.map((p) => p.brand))].sort();
+
+// Sidebar filter options. Real mode reads them from the database, so newly added
+// brands and scent families show up without touching the frontend.
+export async function getFilters() {
+  if (USE_MOCK) {
+    return {
+      brands: getBrands(mockProducts).map((name) => ({ name })),
+      families: NOTE_FAMILIES.map((name) => ({ name })),
+      categories: CATEGORIES,
+    };
+  }
+  return request('/filters/');
+}

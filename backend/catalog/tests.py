@@ -8,7 +8,7 @@ from django.test import TestCase
 from rest_framework.test import APITestCase
 
 from .factories import make_product
-from .models import Product
+from .models import NoteFamily, Product
 from .selectors import search_products
 
 
@@ -78,6 +78,18 @@ class SearchTests(TestCase):
     def test_sort_by_popularity_is_default(self):
         self.assertEqual(self.names(), ["Cedar Noir", "Citrus Day", "Rose Velours"])
 
+    def test_single_family_filter(self):
+        self.tag(woody=[self.cedar, self.rose], floral=[self.rose, self.citrus])
+        self.assertCountEqual(self.names(family="Woody"), ["Cedar Noir", "Rose Velours"])
+
+    def test_multiple_families_require_all(self):
+        self.tag(woody=[self.cedar, self.rose], floral=[self.rose, self.citrus])
+        self.assertEqual(self.names(family=["Woody", "Floral"]), ["Rose Velours"])
+
+    def tag(self, woody, floral):
+        NoteFamily.objects.create(name="Woody").products.set(woody)
+        NoteFamily.objects.create(name="Floral").products.set(floral)
+
 
 class ProductApiTests(APITestCase):
     @classmethod
@@ -116,3 +128,196 @@ class ProductApiTests(APITestCase):
         self.assertEqual(self.client.get(f"/api/products/{pid}/").status_code, 200)
         self.assertEqual(self.client.get("/api/products/999999/").status_code, 404)
         self.assertEqual(len(self.client.get("/api/categories/").json()), 4)
+
+    def test_filter_by_brand(self):
+        data = self.client.get("/api/products/?brand=Dior").json()
+        self.assertEqual(len(data), 3)
+        self.assertTrue(all(p["brand"] == "Dior" for p in data))
+
+    def test_multiple_families_are_combined_with_and(self):
+        data = self.client.get("/api/products/?family=Woody&family=Spicy").json()
+        self.assertTrue(data)
+        self.assertTrue(all({"Woody", "Spicy"} <= set(p["families"]) for p in data))
+        single = self.client.get("/api/products/?family=Woody").json()
+        self.assertLess(len(data), len(single))
+
+
+class ProductImageTests(APITestCase):
+    """Photos live in catalog/product_images/<serial>.jpg; a temp folder stands in for it here."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        patcher = mock.patch("catalog.images.IMAGE_DIR", self.dir)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _photo(self, name):
+        (self.dir / name).write_bytes(b"\xff\xd8fake-jpeg")
+
+    def test_image_path_finds_existing_photo(self):
+        from .images import image_path
+        self._photo("A.jpg")
+        self.assertEqual(image_path("A.jpg"), self.dir / "A.jpg")
+
+    def test_image_path_blocks_folder_tricks(self):
+        from .images import image_path
+        self._photo("A.jpg")
+        # "../" is thrown away, so only a file directly inside the photo folder can match.
+        self.assertEqual(image_path("../../A.jpg"), self.dir / "A.jpg")
+        self.assertIsNone(image_path("../../config/settings.py"))
+
+    def test_image_path_rejects_wrong_type_missing_or_blank(self):
+        from .images import image_path
+        self._photo("notes.txt")
+        self.assertIsNone(image_path("notes.txt"))
+        self.assertIsNone(image_path("missing.jpg"))
+        self.assertIsNone(image_path(""))
+
+    def test_link_command_links_only_products_with_a_file(self):
+        with_photo = make_product(serial_number="HAS-PHOTO")
+        without = make_product(serial_number="NO-PHOTO")
+        self._photo("HAS-PHOTO.jpg")
+        out = StringIO()
+        call_command("link_product_images", stdout=out)
+        with_photo.refresh_from_db()
+        without.refresh_from_db()
+        self.assertEqual(with_photo.image, "HAS-PHOTO.jpg")
+        self.assertEqual(without.image, "")
+        self.assertIn("no photo yet", out.getvalue())
+
+    def test_link_clears_name_when_photo_file_is_gone(self):
+        from .images import link_images
+        stale = make_product(serial_number="DELETED", image="DELETED.png")  # no file on disk
+        self.assertEqual(link_images(Product.objects.filter(pk=stale.pk)), 1)  # counted as a change
+        stale.refresh_from_db()
+        self.assertEqual(stale.image, "")
+
+    def test_missing_file_gives_null_image_url(self):
+        # Even before anyone re-runs the link command, the API must not hand out a broken link.
+        p = make_product(serial_number="VANISHED", image="VANISHED.jpg")
+        self.assertIsNone(self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"])
+
+    def test_link_is_safe_to_rerun(self):
+        from .images import link_images
+        make_product(serial_number="TWICE")
+        self._photo("TWICE.jpg")
+        self.assertEqual(link_images(Product.objects.all()), 1)
+        self.assertEqual(link_images(Product.objects.all()), 0)
+
+    def test_link_prefers_transparent_png_over_jpg(self):
+        both = make_product(serial_number="BOTH")
+        only_jpg = make_product(serial_number="JPG-ONLY")
+        for name in ("BOTH.jpg", "BOTH.png", "JPG-ONLY.jpg"):
+            self._photo(name)
+        call_command("link_product_images", stdout=StringIO())
+        both.refresh_from_db()
+        only_jpg.refresh_from_db()
+        self.assertEqual(both.image, "BOTH.png")
+        self.assertEqual(only_jpg.image, "JPG-ONLY.jpg")
+
+    def test_image_url_changes_when_the_photo_changes(self):
+        # Browsers cache the photo for a day; a new file name must give a new address.
+        p = make_product(serial_number="SWAP", image="SWAP.jpg")
+        self._photo("SWAP.jpg")
+        before = self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"]
+        self._photo("SWAP.png")
+        p.image = "SWAP.png"
+        p.save(update_fields=["image"])
+        after = self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"]
+        self.assertNotEqual(before, after)
+
+    def test_photo_is_found_by_serial_when_nothing_is_linked(self):
+        # A database made before photos existed has an empty image column.
+        # The photo must still show, without anyone running a command.
+        p = make_product(serial_number="NOT-LINKED", image="")
+        self._photo("NOT-LINKED.png")
+        url = self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"]
+        self.assertTrue(url.endswith(f"/api/products/{p.pk}/image/?v=NOT-LINKED.png"))
+        response = self.client.get(f"/api/products/{p.pk}/image/")
+        b"".join(response.streaming_content)  # read it all to release the file
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/png")
+
+    def test_old_file_name_falls_back_to_the_serial_photo(self):
+        # The saved name points at a deleted file, but a photo for this serial exists.
+        p = make_product(serial_number="RENAMED", image="OLD-NAME.jpg")
+        self._photo("RENAMED.png")
+        url = self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"]
+        self.assertTrue(url.endswith("?v=RENAMED.png"))
+
+    def test_saved_file_name_wins_over_the_serial_photo(self):
+        # A product can use a photo with any name; the saved name comes first.
+        p = make_product(serial_number="CHOSEN", image="custom-name.jpg")
+        self._photo("custom-name.jpg")
+        self._photo("CHOSEN.png")
+        url = self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"]
+        self.assertTrue(url.endswith("?v=custom-name.jpg"))
+
+    def test_no_photo_at_all_stays_null_and_404(self):
+        p = make_product(serial_number="NOTHING", image="")
+        self.assertIsNone(self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"])
+        self.assertEqual(self.client.get(f"/api/products/{p.pk}/image/").status_code, 404)
+
+    def test_png_is_served_as_png(self):
+        p = make_product(serial_number="CUT", image="CUT.png")
+        self._photo("CUT.png")
+        response = self.client.get(f"/api/products/{p.pk}/image/")
+        # Read it all to release the file. Don't call response.close(): that ends the
+        # "request", which closes the database connection for the tests that run next.
+        b"".join(response.streaming_content)
+        self.assertEqual(response["Content-Type"], "image/png")
+
+    def test_api_gives_image_url_and_serves_the_file(self):
+        p = make_product(serial_number="SERVE", image="SERVE.jpg")
+        self._photo("SERVE.jpg")
+        data = self.client.get(f"/api/products/{p.pk}/").json()
+        self.assertTrue(data["imageUrl"].endswith(f"/api/products/{p.pk}/image/?v=SERVE.jpg"))
+        response = self.client.get(f"/api/products/{p.pk}/image/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), b"\xff\xd8fake-jpeg")
+
+    def test_no_photo_means_null_url_and_404(self):
+        p = make_product()
+        self.assertIsNone(self.client.get(f"/api/products/{p.pk}/").json()["imageUrl"])
+        self.assertEqual(self.client.get(f"/api/products/{p.pk}/image/").status_code, 404)
+
+    def test_inactive_product_image_is_hidden(self):
+        p = make_product(serial_number="GONE", image="GONE.jpg", active=False)
+        self._photo("GONE.jpg")
+        self.assertEqual(self.client.get(f"/api/products/{p.pk}/image/").status_code, 404)
+
+
+class FilterOptionsTests(TestCase):
+    def test_lists_brands_and_families_with_counts(self):
+        from .models import NoteFamily
+        from .selectors import filter_options
+        woody, _ = NoteFamily.objects.get_or_create(name="Woody")
+        a = make_product(brand="Dior")
+        make_product(brand="Dior")
+        make_product(brand="Chanel")
+        a.families.add(woody)
+        opts = filter_options()
+        self.assertEqual(opts["brands"], [{"name": "Chanel", "count": 1}, {"name": "Dior", "count": 2}])
+        self.assertEqual(opts["families"], [{"name": "Woody", "count": 1}])
+        self.assertEqual(opts["categories"][0]["slug"], "eau-de-parfum")
+
+    def test_hides_brands_with_only_inactive_products(self):
+        from .selectors import filter_options
+        make_product(brand="Gone", active=False)
+        make_product(brand="Here")
+        self.assertEqual([b["name"] for b in filter_options()["brands"]], ["Here"])
+
+
+class FilterOptionsApiTests(APITestCase):
+    def test_filters_endpoint_is_public_and_lists_db_brands(self):
+        make_product(brand="Brand From Database")
+        response = self.client.get("/api/filters/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn({"name": "Brand From Database", "count": 1}, response.json()["brands"])
+        self.assertEqual(set(response.json()), {"brands", "families", "categories"})

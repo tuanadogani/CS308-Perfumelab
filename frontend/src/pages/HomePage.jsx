@@ -15,7 +15,7 @@ export default function HomePage() {
 
   return (
     <>
-      {/* HERO */}
+      {/* HERO: the two most popular perfumes (drawn bottles until the list has loaded) */}
       <section className="hero">
         <div className="container hero__inner">
           <div className="hero__text">
@@ -32,8 +32,8 @@ export default function HomePage() {
           </div>
           <div className="hero__visual" aria-hidden="true">
             <div className="hero__halo" />
-            <div className="hero__bottle hero__bottle--back"><PerfumeBottle color="#8e2c3f" variant={2} size={260} /></div>
-            <div className="hero__bottle hero__bottle--front"><PerfumeBottle color="#b5651d" variant={0} size={330} /></div>
+            <div className="hero__bottle hero__bottle--back"><PerfumeBottle color="#8b97a5" collar="#c9ced4" variant={2} size={260} imageUrl={featured[1]?.imageUrl} /></div>
+            <div className="hero__bottle hero__bottle--front"><PerfumeBottle color="#2b3138" collar="#c9ced4" variant={0} size={330} imageUrl={featured[0]?.imageUrl} /></div>
           </div>
         </div>
       </section>

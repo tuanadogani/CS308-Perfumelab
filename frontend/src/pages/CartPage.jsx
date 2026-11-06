@@ -32,7 +32,7 @@ export default function CartPage() {
         <ul className="cart__list">
           {items.map((i) => (
             <li key={i.productId} className="cart-item">
-              <PerfumeBottle color={i.color} variant={i.productId} size={90} alt={i.name} />
+              <PerfumeBottle color={i.color} variant={i.productId} size={90} alt={i.name} imageUrl={i.imageUrl} />
               <div className="cart-item__info">
                 <p className="eyebrow">{i.brand}</p>
                 <Link to={`/shop/${i.productId}`}><strong>{i.name}</strong></Link>

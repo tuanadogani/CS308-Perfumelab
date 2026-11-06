@@ -8,8 +8,12 @@ SORTS = {
 }
 
 
-def search_products(queryset, q="", category="", brand="", family="", sort="popularity"):
-    """Out-of-stock products are deliberately kept in the results."""
+def search_products(queryset, q="", category="", brand="", family=(), sort="popularity"):
+    """Out-of-stock products are deliberately kept in the results.
+
+    `family` accepts one name or a list of names; a product must belong to every
+    selected family (AND), so each extra family narrows the results.
+    """
     q = (q or "").strip()
     if q:
         queryset = queryset.filter(
@@ -19,6 +23,33 @@ def search_products(queryset, q="", category="", brand="", family="", sort="popu
         queryset = queryset.filter(category__slug=category)
     if brand:
         queryset = queryset.filter(brand__name=brand)
-    if family:
-        queryset = queryset.filter(families__name=family)
+    families = [family] if isinstance(family, str) else list(family or ())
+    for name in filter(None, families):
+        queryset = queryset.filter(families__name=name)
     return queryset.order_by(*SORTS.get(sort, SORTS["popularity"])).distinct()
+
+
+def filter_options():
+    """Everything the shop's filter sidebar needs, straight from the database.
+
+    Replaces the frontend's hard-coded mock lists. Only brands/families that have at
+    least one active product are listed, each with how many products it has.
+    """
+    from django.db.models import Count, Q
+
+    from .models import Brand, Category, NoteFamily
+
+    active = Q(products__active=True)
+    def rows(model):
+        return [
+            {"name": row.name, "count": row.n}
+            for row in model.objects.annotate(n=Count("products", filter=active)).filter(n__gt=0).order_by("name")
+        ]
+    return {
+        "categories": [
+            {"slug": c.slug, "name": c.name, "count": c.n}
+            for c in Category.objects.annotate(n=Count("products", filter=active)).order_by("name")
+        ],
+        "brands": rows(Brand),
+        "families": rows(NoteFamily),
+    }

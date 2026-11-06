@@ -5,19 +5,19 @@ import { ROLES, ROLE_LABELS } from '../../constants/roles';
 // Skeleton in Sprint 1; contents are filled in during the relevant sprints.
 const MODULES = {
   [ROLES.PRODUCT_MANAGER]: [
-    ['Products & Categories', 'Add / remove products, manage categories', 'Sprint 3'],
-    ['Stock Management', 'Update stock quantities', 'Sprint 3'],
-    ['Delivery List', 'Pending deliveries and addresses', 'Sprint 3'],
-    ['Comment Approval', 'Approve / reject comments', 'Sprint 3'],
+    ['Products & Categories', 'Add / remove products, manage categories'],
+    ['Stock Management', 'Update stock quantities'],
+    ['Delivery List', 'Pending deliveries and addresses'],
+    ['Comment Approval', 'Approve / reject comments'],
   ],
   [ROLES.SALES_MANAGER]: [
-    ['Pricing & Discounts', 'Set prices, apply discounts', 'Sprint 4'],
-    ['Invoices', 'View invoices in a date range / export PDF', 'Sprint 4'],
-    ['Revenue Report', 'Profit / loss chart', 'Sprint 4'],
-    ['Refund Requests', 'Evaluate refund requests', 'Sprint 5'],
+    ['Pricing & Discounts', 'Set prices, apply discounts'],
+    ['Invoices', 'View invoices in a date range / export PDF'],
+    ['Revenue Report', 'Profit / loss chart'],
+    ['Refund Requests', 'Evaluate refund requests'],
   ],
   [ROLES.SUPPORT_AGENT]: [
-    ['Live Chat Queue', 'View and claim active conversations', 'Sprint 4'],
+    ['Live Chat Queue', 'View and claim active conversations'],
   ],
 };
 
