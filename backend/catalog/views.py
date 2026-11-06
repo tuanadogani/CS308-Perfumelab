@@ -7,7 +7,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .images import image_path
+from .images import image_path, photo_for
 from .models import Category, Product
 from .selectors import filter_options, search_products
 from .serializers import CategorySerializer, ProductSerializer
@@ -60,7 +60,7 @@ class ProductImage(View):
 
     def get(self, request, pk):
         product = get_object_or_404(Product, pk=pk, active=True)
-        path = image_path(product.image)
+        path = image_path(photo_for(product))
         if path is None:
             raise Http404("No image for this product.")
         response = FileResponse(open(path, "rb"))
