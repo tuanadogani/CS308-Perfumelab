@@ -228,3 +228,94 @@ class SalesInvoiceApiTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("attachment", response["Content-Disposition"])
 
+
+class SalesAnalyticsApiTests(APITestCase):
+    def setUp(self):
+        self.sales_manager = make_user("sales_manager")
+        self.customer = make_user("customer", name="Ross Geller")
+        self.product_manager = make_user("product_manager")
+        # Product with default cost (50% = 500)
+        self.p_default = make_product(name="Bleu de Chanel", price="1000.00", stock=10)
+        # Product with specified custom cost (700)
+        self.p_custom = make_product(name="Sauvage", price="1000.00", cost="700.00", stock=10)
+
+    def test_requires_authentication(self):
+        response = self.client.get("/api/sales/analytics/")
+        self.assertEqual(response.status_code, 401)
+
+    def test_forbidden_for_customers_and_product_managers(self):
+        for user in (self.customer, self.product_manager):
+            self.client.force_authenticate(user)
+            self.assertEqual(self.client.get("/api/sales/analytics/").status_code, 403)
+            self.assertEqual(self.client.get("/api/sales/revenue/").status_code, 403)
+
+    def test_revenue_and_profit_calculation_with_default_cost(self):
+        # 2 units of p_default (unit_price=1000, unit_cost=500)
+        place_order(self.customer, cart_with(self.customer, self.p_default, 2))
+        self.client.force_authenticate(self.sales_manager)
+
+        response = self.client.get("/api/sales/analytics/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["totalOrders"], 1)
+        self.assertEqual(response.data["totalRevenue"], 2000.0)
+        self.assertEqual(response.data["totalCost"], 1000.0)
+        self.assertEqual(response.data["profit"], 1000.0)
+        self.assertTrue(response.data["isProfit"])
+        self.assertEqual(response.data["profitMargin"], 50.0)
+
+    def test_revenue_and_profit_with_custom_product_cost(self):
+        # 1 unit of p_custom (unit_price=1000, unit_cost=700)
+        place_order(self.customer, cart_with(self.customer, self.p_custom, 1))
+        self.client.force_authenticate(self.sales_manager)
+
+        response = self.client.get("/api/sales/revenue/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["totalRevenue"], 1000.0)
+        self.assertEqual(response.data["totalCost"], 700.0)
+        self.assertEqual(response.data["profit"], 300.0)
+        self.assertEqual(response.data["profitMargin"], 30.0)
+
+    def test_cancelled_orders_excluded_from_analytics(self):
+        order = place_order(self.customer, cart_with(self.customer, self.p_default, 1))
+        cancel_order(order)
+        self.client.force_authenticate(self.sales_manager)
+
+        response = self.client.get("/api/sales/analytics/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["totalOrders"], 0)
+        self.assertEqual(response.data["totalRevenue"], 0.0)
+        self.assertEqual(response.data["totalCost"], 0.0)
+        self.assertEqual(response.data["profit"], 0.0)
+
+    def test_date_range_filtering_and_chart_data(self):
+        today = timezone.now().date()
+        yesterday = today - timedelta(days=1)
+        # Order today
+        place_order(self.customer, cart_with(self.customer, self.p_default, 1))
+
+        self.client.force_authenticate(self.sales_manager)
+        response = self.client.get(f"/api/sales/analytics/?start_date={yesterday.isoformat()}&end_date={today.isoformat()}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["startDate"], yesterday.isoformat())
+        self.assertEqual(response.data["endDate"], today.isoformat())
+
+        chart = response.data["chartData"]
+        self.assertEqual(len(chart), 2)
+        # Yesterday had 0 orders
+        self.assertEqual(chart[0]["date"], yesterday.isoformat())
+        self.assertEqual(chart[0]["revenue"], 0.0)
+        self.assertEqual(chart[0]["orderCount"], 0)
+        # Today had 1 order
+        self.assertEqual(chart[1]["date"], today.isoformat())
+        self.assertEqual(chart[1]["revenue"], 1000.0)
+        self.assertEqual(chart[1]["cost"], 500.0)
+        self.assertEqual(chart[1]["profit"], 500.0)
+        self.assertEqual(chart[1]["orderCount"], 1)
+
+    def test_invalid_date_order_returns_400(self):
+        self.client.force_authenticate(self.sales_manager)
+        response = self.client.get("/api/sales/analytics/?start_date=2026-11-10&end_date=2026-11-01")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("start_date cannot be after end_date", response.data["message"])
+
+
