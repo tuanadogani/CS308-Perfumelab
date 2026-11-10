@@ -91,10 +91,10 @@ For local integration, verify `/api/health/`, product browsing, registration, lo
 
 ## Remaining integration work
 
-Cart, orders, payments, refunds and reviews contain models/services and tests, but have
-no HTTP API routes yet. The frontend cart still uses localStorage, checkout shows a placeholder,
-and admin screens are skeletons. These features need authenticated API views, ownership/role
-checks and frontend screens before they can be used end to end. Payments currently use a mock bank.
+Customer cart/checkout, payments, refunds and review submission still need HTTP API
+and frontend integration. The frontend cart uses localStorage, checkout shows a placeholder,
+and admin screens are skeletons. Product manager backend APIs are available (see below).
+Payments currently use a mock bank.
 
 ## Wishlist
 
@@ -106,3 +106,28 @@ All wishlist endpoints require Bearer authentication and only access the current
 The frontend shares wishlist state between product cards, product details and `/wishlist`.
 Signed-in users save to PostgreSQL; guests and mock accounts save locally in separate browser storage keys.
 Guest favorites remain separate from account favorites; automatic merging is not implemented.
+
+## Product manager
+
+The product manager implementation is backend only; frontend integration is handled separately.
+All routes below require a `product_manager` account Bearer token and reject other roles.
+
+Base path: `/api/product-manager/`
+
+- `GET, POST products/` — list all products (including inactive) or create a product.
+- `GET, PATCH, DELETE products/<id>/` — edit, update stock, or remove from the public catalog. DELETE soft deletes; PATCH `{ "active": true }` restores the product.
+- `GET, POST categories/` and `GET, PATCH, DELETE categories/<id>/` — manage categories. A category referenced by any product cannot be deleted.
+- `GET deliveries/` — delivery ID, order/customer/product IDs, quantity, line total, address, status and completion flag. Cancelled/refunded orders are excluded.
+- `PATCH orders/<id>/status/` with `{ "status": "in_transit" }` or `{ "status": "delivered" }` — advance exactly one step. The entire order advances together; delivery completion and delivered timestamp update on delivery.
+- `GET comments/` — pending and previously moderated comments.
+- `PATCH comments/<id>/` with `{ "approve": true }` or `{ "approve": false }` — approve/reject and record reviewer/time. Ratings are unaffected.
+
+Product writes use model field names: `name`, `model`, `serial_number`, `description`,
+`stock`, `warranty_status`, `distributor`, `brand` (name), `category` (slug),
+`gender`, `volume_ml`, optional `families` (name array), `notes`
+(`{ "top": [], "heart": [], "base": [] }`), and `active`.
+Responses use the public catalog's camelCase schema plus `active`.
+New products start at price/base price 0; pricing and discounts belong to the sales manager.
+Existing prices are preserved during product manager updates. No database migration is needed.
+
+Run regression tests with `python manage.py test catalog orders reviews`.
