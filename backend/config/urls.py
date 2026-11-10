@@ -17,6 +17,7 @@ def health(request):
 
 urlpatterns = [
     path("api/health/", health),
+    path("api/product-manager/", include("catalog.manager_urls")),
     path("api/auth/", include("accounts.urls")),
     path("api/", include("catalog.urls")),
     path("api/", include("wishlist.urls")),
