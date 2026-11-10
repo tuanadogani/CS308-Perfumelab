@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import PerfumeBottle from '../components/PerfumeBottle';
 import WishlistButton from '../components/WishlistButton';
+import PriceTag, { SaleBadge } from '../components/PriceTag';
 import StockBadge from '../components/StockBadge';
 import { getProduct } from '../api/productApi';
 import { useCart } from '../context/CartContext';
-import { formatPrice } from '../utils/format';
 
 export default function ProductDetailPage() {
   const { id } = useParams();
@@ -48,7 +48,10 @@ export default function ProductDetailPage() {
             <WishlistButton product={product} large />
           </div>
           <p className="muted">{product.gender} · {product.volumeMl} ml · ★ {product.rating}</p>
-          <p className="price price--lg">{formatPrice(product.price)}</p>
+          <div className="detail__price">
+            <PriceTag product={product} large />
+            <SaleBadge product={product} className="sale-badge--inline" />
+          </div>
           <StockBadge stock={product.stock} />
           <p className="lead">{product.description}</p>
 

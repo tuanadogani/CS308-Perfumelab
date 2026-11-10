@@ -4,13 +4,18 @@ import PerfumeBottle from '../components/PerfumeBottle';
 import ProductCard from '../components/ProductCard';
 import { getProducts } from '../api/productApi';
 import { useAuth } from '../context/AuthContext';
+import { isDiscounted, formatRate } from '../components/PriceTag';
 
 export default function HomePage() {
   const { isAuthenticated } = useAuth();
   const [featured, setFeatured] = useState([]);
+  const [maxDiscount, setMaxDiscount] = useState(0);
 
   useEffect(() => {
-    getProducts({ sort: 'popularity' }).then((list) => setFeatured(list.slice(0, 4)));
+    getProducts({ sort: 'popularity' }).then((list) => {
+      setFeatured(list.slice(0, 4));
+      setMaxDiscount(Math.max(0, ...list.filter(isDiscounted).map((p) => Number(p.discountRate))));
+    });
   }, []);
 
   return (
@@ -51,6 +56,19 @@ export default function HomePage() {
           </div>
         ))}
       </section>
+
+      {/* SALE BANNER: only while at least one product is discounted */}
+      {maxDiscount > 0 && (
+        <section className="container sale-banner-wrap">
+          <Link to="/shop?sale=1" className="sale-banner">
+            <span className="sale-banner__text">
+              <span className="eyebrow">Limited-time offer</span>
+              <strong>Up to {formatRate(maxDiscount)} off selected fragrances</strong>
+            </span>
+            <span className="link-arrow">Shop the sale →</span>
+          </Link>
+        </section>
+      )}
 
       {/* FEATURED */}
       <section className="container section">
