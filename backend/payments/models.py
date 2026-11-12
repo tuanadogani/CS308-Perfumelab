@@ -51,3 +51,20 @@ class Payment(models.Model):
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     transaction_id = models.CharField(max_length=40, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class PaymentRefund(models.Model):
+    """Bank confirmation tied to the original payment and one returned order line."""
+
+    refund_request = models.OneToOneField(
+        "refunds.RefundRequest", on_delete=models.PROTECT, related_name="payment_refund"
+    )
+    payment = models.ForeignKey(Payment, on_delete=models.PROTECT, related_name="refunds")
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    transaction_id = models.CharField(max_length=40, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=models.Q(amount__gte=0), name="payment_refund_amount_gte_0"),
+        ]

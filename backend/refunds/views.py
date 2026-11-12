@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import IsSalesManager
+from payments.bank import RefundDeclined
 from .models import RefundRequest
 from .serializers import RefundDecisionSerializer, RefundFilterSerializer, SalesRefundSerializer
 from .services import decide_refund, receive_return
@@ -11,7 +12,7 @@ from .services import decide_refund, receive_return
 
 def sales_refunds():
     return RefundRequest.objects.select_related(
-        "order_item__order__user", "order_item__product"
+        "order_item__order__user", "order_item__product", "payment_refund"
     ).order_by("-requested_at", "-pk")
 
 
@@ -54,6 +55,8 @@ class SalesRefundDecisionView(APIView):
         serializer.is_valid(raise_exception=True)
         try:
             decide_refund(refund, request.user, **serializer.validated_data)
+        except RefundDeclined:
+            return Response({"message": "The bank could not process the refund. Please retry."}, status=502)
         except ValidationError as exc:
             return Response({"message": " ".join(exc.messages)}, status=400)
         return Response(SalesRefundSerializer(sales_refunds().get(pk=pk)).data)

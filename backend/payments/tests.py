@@ -124,3 +124,24 @@ class CheckoutPaymentTests(TestCase):
             with self.assertRaises(PaymentDeclined):
                 self.pay(number="4242 4242 4242 4243")
         self.assertEqual(len(mail.outbox), 0)
+
+
+class MockBankRefundTests(TestCase):
+    def test_retry_returns_same_reference(self):
+        from decimal import Decimal
+        from .bank import refund
+        first = refund("TXN-ORIGINAL", Decimal("700.00"), idempotency_key="refund-1")
+        self.assertEqual(first, refund("TXN-ORIGINAL", Decimal("700.00"), idempotency_key="refund-1"))
+        self.assertNotEqual(first, refund("TXN-ORIGINAL", Decimal("700.00"), idempotency_key="refund-2"))
+        self.assertNotEqual(first, refund("TXN-OTHER", Decimal("700.00"), idempotency_key="refund-1"))
+
+    def test_invalid_refund_details_rejected(self):
+        from decimal import Decimal
+        from .bank import RefundDeclined, refund
+        for transaction_id, amount, key in [
+            ("", "10", "key"), ("TXN-1", "10", ""), ("TXN-1", "-1", "key"),
+            ("TXN-1", "NaN", "key"), ("TXN-1", "Infinity", "key"),
+        ]:
+            with self.subTest(transaction_id=transaction_id, amount=amount, key=key):
+                with self.assertRaises(RefundDeclined):
+                    refund(transaction_id, Decimal(amount), idempotency_key=key)

@@ -13,7 +13,7 @@ from .services import cancel_order
 
 
 def customer_orders(user):
-    return Order.objects.filter(user=user).prefetch_related("items__product", "items__refund")
+    return Order.objects.filter(user=user).prefetch_related("items__product", "items__refund__payment_refund")
 
 
 class CustomerOrderListView(APIView):

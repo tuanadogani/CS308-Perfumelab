@@ -1,5 +1,6 @@
 import threading
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.core import mail
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -11,18 +12,26 @@ from rest_framework.test import APITestCase
 from cart.models import Cart
 from cart.services import add_to_cart
 from catalog.factories import make_product, make_user
-from orders.models import Order, OrderItem, OrderStatus
+from orders.models import Order, OrderStatus
 from orders.services import advance_status, place_order
+from payments.models import CreditCard, PaymentRefund
+from payments.services import checkout
 from wishlist.services import set_discount
 
 from .models import RefundRequest, RefundStatus
 from .services import decide_refund, receive_return, request_refund
 
 
+def paid_order(user, cart):
+    number = "4242424242424242"
+    card = CreditCard.from_number(user, number, "Test Customer", 12, 2030)
+    return checkout(user, cart, card, number)
+
+
 def delivered_order(user, product, qty=1):
     cart = Cart.objects.create(user=user)
     add_to_cart(cart, product, qty)
-    order = place_order(user, cart)
+    order = paid_order(user, cart)
     advance_status(order)
     advance_status(order)
     return order
@@ -72,7 +81,8 @@ class RefundTests(TestCase):
         refund = request_refund(self.user, self.item)
         receive_return(refund, self.sales)
         stock_before = self.product.__class__.objects.get(pk=self.product.pk).stock
-        decide_refund(refund, self.sales, approve=True)
+        with self.captureOnCommitCallbacks(execute=True):
+            decide_refund(refund, self.sales, approve=True)
         self.product.refresh_from_db()
         self.assertEqual(self.product.stock, stock_before + 2)
         self.assertEqual(len(mail.outbox), 1)
@@ -209,9 +219,12 @@ class SalesRefundApiTests(APITestCase):
 
     def test_approval_records_decision_once(self):
         self.client.post(self.base + "receive/")
-        response = self.client.post(self.base + "decision/", {"approve": True}, format="json")
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(self.base + "decision/", {"approve": True}, format="json")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["status"], RefundStatus.APPROVED)
+        self.assertEqual(response.data["paymentRefund"]["amount"], "2000.00")
+        self.assertTrue(response.data["paymentRefund"]["transactionId"].startswith("RFND-"))
         self.assertEqual(response.data["decidedBy"], self.sales.pk)
         self.assertIsNotNone(response.data["decidedAt"])
         for approve in (True, False):
@@ -272,10 +285,17 @@ class SalesRefundApiTests(APITestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_partial_approval_keeps_order_delivered_until_all_lines_approved(self):
-        second = make_product(stock=4, popularity=1)
-        second_item = OrderItem.objects.create(order=self.order, product=second, quantity=1,
-                                               unit_price=1000, unit_cost=500)
-        second_refund = request_refund(self.customer, second_item)
+        customer = make_user()
+        cart = Cart.objects.create(user=customer)
+        second = make_product(stock=5)
+        add_to_cart(cart, self.product, 2)
+        add_to_cart(cart, second)
+        self.order = paid_order(customer, cart)
+        advance_status(self.order)
+        advance_status(self.order)
+        self.refund = request_refund(customer, self.order.items.get(product=self.product))
+        second_item = self.order.items.get(product=second)
+        second_refund = request_refund(customer, second_item)
         receive_return(self.refund, self.sales)
         decide_refund(self.refund, self.sales, approve=True)
         self.order.refresh_from_db()
@@ -310,7 +330,7 @@ class RefundConcurrencyTests(TransactionTestCase):
         cart = Cart.objects.create(user=customer)
         for product in products:
             add_to_cart(cart, product)
-        order = place_order(customer, cart)
+        order = paid_order(customer, cart)
         advance_status(order)
         advance_status(order)
         refunds = [request_refund(customer, item) for item in order.items.all()]
@@ -336,9 +356,207 @@ class RefundConcurrencyTests(TransactionTestCase):
             thread.join(timeout=15)
         self.assertFalse(any(thread.is_alive() for thread in threads))
         self.assertEqual(results, ["approved", "approved"])
+        self.assertEqual(PaymentRefund.objects.filter(payment=order.payment).count(), 2)
         order.refresh_from_db()
         self.assertEqual(order.status, OrderStatus.REFUNDED)
         for product in products:
             product.refresh_from_db()
             self.assertEqual(product.stock, 5)
             self.assertEqual(product.popularity, 0)
+
+
+    def test_concurrent_approval_of_same_request_calls_bank_once(self):
+        from payments import bank
+        customer, manager = make_user(), make_user("sales_manager")
+        product = make_product(stock=5)
+        order = delivered_order(customer, product)
+        refund = request_refund(customer, order.items.get())
+        receive_return(refund, manager)
+        barrier = threading.Barrier(2)
+        results = []
+
+        def approve():
+            try:
+                barrier.wait(timeout=10)
+                decide_refund(refund, manager, approve=True)
+                results.append("approved")
+            except ValidationError:
+                results.append("already decided")
+            except Exception as exc:
+                results.append(type(exc).__name__)
+            finally:
+                connection.close()
+
+        with patch("payments.services.bank.refund", wraps=bank.refund) as mocked:
+            threads = [threading.Thread(target=approve) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=15)
+            self.assertFalse(any(thread.is_alive() for thread in threads))
+            self.assertEqual(mocked.call_count, 1)
+        self.assertCountEqual(results, ["approved", "already decided"])
+        self.assertEqual(PaymentRefund.objects.filter(refund_request=refund).count(), 1)
+        product.refresh_from_db()
+        self.assertEqual(product.stock, 5)
+
+
+class RefundPaymentTests(APITestCase):
+    def setUp(self):
+        self.customer, self.manager = make_user(), make_user("sales_manager")
+        self.product = make_product(stock=5)
+        self.order = delivered_order(self.customer, self.product, 2)
+        self.refund = request_refund(self.customer, self.order.items.get())
+        receive_return(self.refund, self.manager)
+        self.client.force_authenticate(self.manager)
+        self.url = f"/api/sales/refunds/{self.refund.pk}/decision/"
+
+    def assert_pending_without_payment(self):
+        self.refund.refresh_from_db()
+        self.order.refresh_from_db()
+        self.product.refresh_from_db()
+        self.assertEqual(self.refund.status, RefundStatus.REQUESTED)
+        self.assertIsNone(self.refund.decided_at)
+        self.assertIsNone(self.refund.decided_by)
+        self.assertEqual(self.order.status, OrderStatus.DELIVERED)
+        self.assertEqual(self.product.stock, 3)
+        self.assertEqual(self.product.popularity, 2)
+        self.assertFalse(PaymentRefund.objects.filter(refund_request=self.refund).exists())
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_bank_receives_original_payment_and_frozen_amount(self):
+        from payments import bank
+        with patch("payments.services.bank.refund", wraps=bank.refund) as mocked:
+            response = self.client.post(self.url, {"approve": True, "amount": "1.00"}, format="json")
+        self.assertEqual(response.status_code, 200)
+        mocked.assert_called_once_with(
+            self.order.payment.transaction_id, self.refund.amount,
+            idempotency_key=f"refund-request-{self.refund.pk}",
+        )
+        record = PaymentRefund.objects.get(refund_request=self.refund)
+        self.assertEqual(record.payment, self.order.payment)
+        self.assertEqual(record.amount, 2000)
+        self.assertEqual(response.data["paymentRefund"]["transactionId"], record.transaction_id)
+        self.client.force_authenticate(self.customer)
+        item = self.client.get(f"/api/orders/{self.order.pk}/").data["items"][0]
+        self.assertEqual(item["refund"]["paymentRefund"]["amount"], "2000.00")
+
+    def test_bank_failure_rolls_back_and_can_be_retried(self):
+        from payments.bank import RefundDeclined
+        with patch("payments.services.bank.refund", side_effect=RefundDeclined("Bank unavailable")):
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(self.url, {"approve": True}, format="json")
+        self.assertEqual(response.status_code, 502)
+        self.assert_pending_without_payment()
+        response = self.client.post(self.url, {"approve": True}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(PaymentRefund.objects.count(), 1)
+
+    def test_missing_payment_cannot_be_approved_but_can_be_rejected(self):
+        self.order.payment.delete()
+        with patch("payments.services.bank.refund") as mocked:
+            response = self.client.post(self.url, {"approve": True}, format="json")
+        self.assertEqual(response.status_code, 400)
+        mocked.assert_not_called()
+        self.assert_pending_without_payment()
+        self.assertEqual(self.client.post(self.url, {"approve": False}, format="json").status_code, 200)
+
+    def test_refund_cannot_exceed_original_payment(self):
+        payment = self.order.payment
+        payment.amount = 1000
+        payment.save(update_fields=["amount"])
+        with patch("payments.services.bank.refund") as mocked:
+            response = self.client.post(self.url, {"approve": True}, format="json")
+        self.assertEqual(response.status_code, 400)
+        mocked.assert_not_called()
+        self.assert_pending_without_payment()
+
+    def test_rejection_never_calls_bank(self):
+        with patch("payments.services.bank.refund") as mocked:
+            self.assertEqual(self.client.post(self.url, {"approve": False}, format="json").status_code, 200)
+        mocked.assert_not_called()
+        self.assertFalse(PaymentRefund.objects.exists())
+
+    def test_repeated_approval_does_not_call_bank_or_restock_twice(self):
+        from payments import bank
+        with patch("payments.services.bank.refund", wraps=bank.refund) as mocked:
+            self.assertEqual(self.client.post(self.url, {"approve": True}, format="json").status_code, 200)
+            self.assertEqual(self.client.post(self.url, {"approve": True}, format="json").status_code, 400)
+        self.assertEqual(mocked.call_count, 1)
+        self.assertEqual(PaymentRefund.objects.count(), 1)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 5)
+
+    def test_payment_service_returns_existing_confirmation_without_bank_call(self):
+        from payments.services import refund_payment
+        decide_refund(self.refund, self.manager, approve=True)
+        with patch("payments.services.bank.refund") as mocked:
+            record = refund_payment(self.refund)
+        mocked.assert_not_called()
+        self.assertEqual(record.pk, PaymentRefund.objects.get().pk)
+
+    def test_deleted_saved_card_does_not_prevent_refund(self):
+        self.order.payment.card.delete()
+        response = self.client.post(self.url, {"approve": True}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(PaymentRefund.objects.get().payment_id, self.order.payment.pk)
+
+    def test_database_failure_after_bank_confirmation_is_safe_to_retry(self):
+        from django.db import IntegrityError
+        from payments import bank
+        with patch("payments.services.bank.refund", wraps=bank.refund) as mocked:
+            with patch("payments.services.PaymentRefund.objects.create", side_effect=IntegrityError("write failed")):
+                with self.assertRaises(IntegrityError):
+                    decide_refund(self.refund, self.manager, approve=True)
+            self.assert_pending_without_payment()
+            decide_refund(self.refund, self.manager, approve=True)
+        self.assertEqual(mocked.call_count, 2)
+        self.assertEqual(mocked.call_args_list[0], mocked.call_args_list[1])
+        record = PaymentRefund.objects.get()
+        self.assertEqual(record.transaction_id, bank.refund(
+            self.order.payment.transaction_id, self.refund.amount,
+            idempotency_key=f"refund-request-{self.refund.pk}",
+        ))
+
+    def test_discounted_payment_is_refunded_after_campaign_ends(self):
+        user = make_user()
+        product = make_product(price="1000.00")
+        product.apply_discount(30)
+        order = delivered_order(user, product)
+        product.apply_discount(0)
+        refund = request_refund(user, order.items.get())
+        receive_return(refund, self.manager)
+        decide_refund(refund, self.manager, approve=True)
+        self.assertEqual(PaymentRefund.objects.get(refund_request=refund).amount, 700)
+
+    def test_partial_refunds_cannot_cumulatively_exceed_payment(self):
+        user = make_user()
+        cart = Cart.objects.create(user=user)
+        products = [make_product(), make_product()]
+        for product in products:
+            add_to_cart(cart, product)
+        order = paid_order(user, cart)
+        advance_status(order)
+        advance_status(order)
+        first, second = [request_refund(user, item) for item in order.items.all()]
+        for refund in (first, second):
+            receive_return(refund, self.manager)
+        decide_refund(first, self.manager, approve=True)
+        payment = order.payment
+        payment.amount = 1500
+        payment.save(update_fields=["amount"])
+        with self.assertRaises(ValidationError):
+            decide_refund(second, self.manager, approve=True)
+        self.assertEqual(payment.refunds.count(), 1)
+        second.refresh_from_db()
+        self.assertEqual(second.status, RefundStatus.REQUESTED)
+
+    def test_zero_price_purchase_has_zero_refund_confirmation(self):
+        user = make_user()
+        product = make_product()
+        product.apply_discount(100)
+        order = delivered_order(user, product)
+        refund = request_refund(user, order.items.get())
+        receive_return(refund, self.manager)
+        decide_refund(refund, self.manager, approve=True)
+        self.assertEqual(PaymentRefund.objects.get(refund_request=refund).amount, 0)

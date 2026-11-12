@@ -155,12 +155,12 @@ Order responses use camelCase keys (`shippingAddress`, `createdAt`, `deliveredAt
 `productId`, `productName`, `unitPrice`, `lineTotal`). Monetary values in these
 customer routes are decimal strings. Each item has `refund: null` or a refund
 object containing `id`, `orderItemId`, `reason`, `status`, `amount`, `requestedAt`,
-`receivedAt` and `decidedAt`. Internal product cost is excluded.
+`receivedAt`, `decidedAt` and `paymentRefund`. Internal product cost is excluded.
 
 These APIs operate on existing orders. Customer cart/checkout HTTP integration is
-still pending. Payment refund processing is subsequent work.
+still pending. Refund processing uses the mock bank described below.
 
-Run `python manage.py test orders refunds --keepdb` for regression coverage.
+Run `python manage.py test orders refunds payments --keepdb` for regression coverage.
 
 ## Sales manager return review
 
@@ -184,6 +184,40 @@ approved. Rejected requests keep stock and order status unchanged. Decided reque
 cannot be received or decided again (400). The 30-day eligibility window applies
 when the customer requests the return, so a timely request can be decided later.
 
-Approval currently uses the existing restock and email service. It does **not** yet
-issue a bank refund or store a refund transaction; that payment integration and
-moving notification delivery after transaction commit are planned for the next commit.
+## Refund payments (mock bank)
+
+Apply `payments/0003_payment_refund` with `python manage.py migrate`.
+Approval now requires a `Payment` for the order (created by `payments.services.checkout`).
+Orders created directly with `place_order` have no payment and cannot be approved
+for a refund (400); they can still be rejected. No payment records are invented
+for legacy orders or earlier approvals.
+
+The bank refund references the original payment transaction, so the saved card
+may be deleted without preventing a refund. No card number is needed. The amount
+comes from the request's frozen purchase-time price, and cumulative refunds cannot
+exceed the original payment. A zero-price purchase produces a zero-amount confirmation.
+Each request has one protected `PaymentRefund` with its original payment, amount,
+unique bank reference and timestamp. Repeated decisions are rejected before a
+second bank call; concurrent approvals are serialized.
+
+The existing decision endpoint returns 502 when the mock bank raises `RefundDeclined`.
+The request stays pending with no stock, order status or refund-record change, and
+the manager can retry. A stable key based on the refund request ID is used on each
+bank attempt. The mock deterministically returns the same confirmation on retry,
+including after a local database rollback. This simulates an idempotent provider;
+it does not transfer money or maintain a real banking ledger. A real provider must
+implement durable idempotency and reconciliation across bank/database failures.
+
+Customer and manager refund responses include `paymentRefund: null` before payment
+or an object such as:
+
+```json
+{
+  "amount": "700.00",
+  "transactionId": "RFND-EXAMPLE",
+  "refundedAt": "2026-11-12T22:00:00+03:00"
+}
+```
+
+Existing approval email is scheduled after commit; email errors cannot undo the
+refund. Application notifications and further notification handling are subsequent work.

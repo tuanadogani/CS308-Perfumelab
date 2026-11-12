@@ -1,12 +1,14 @@
 import logging
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Sum
 
 from orders.invoices import seal_and_email
 from orders.services import place_order
 
 from . import bank
-from .models import Payment
+from .models import Payment, PaymentRefund
 
 log = logging.getLogger(__name__)
 
@@ -33,3 +35,28 @@ def _send_invoice(order):
         seal_and_email(order.invoice)
     except Exception:  # the order is already paid; a mail problem must not undo it
         log.exception("Invoice email failed for order %s", order.pk)
+
+
+@transaction.atomic
+def refund_payment(refund):
+    """Refund a locked request; decide_refund owns lifecycle/permission checks.
+
+    Lock the original payment to serialize partial refunds and cap the cumulative
+    amount. A saved confirmation is returned without calling the bank again.
+    """
+    try:
+        payment = Payment.objects.select_for_update().get(order_id=refund.order_item.order_id)
+    except Payment.DoesNotExist:
+        raise ValidationError("The order has no recorded payment to refund.")
+    existing = PaymentRefund.objects.filter(refund_request=refund).first()
+    if existing:
+        return existing
+    refunded = payment.refunds.aggregate(total=Sum("amount"))["total"] or 0
+    if refund.amount < 0 or refunded + refund.amount > payment.amount:
+        raise ValidationError("The refund would exceed the original payment amount.")
+    transaction_id = bank.refund(
+        payment.transaction_id, refund.amount, idempotency_key=f"refund-request-{refund.pk}"
+    )
+    return PaymentRefund.objects.create(
+        refund_request=refund, payment=payment, amount=refund.amount, transaction_id=transaction_id
+    )

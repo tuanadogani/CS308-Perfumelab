@@ -1,6 +1,17 @@
 from rest_framework import serializers
 
+from payments.models import PaymentRefund
 from .models import RefundRequest, RefundStatus
+
+
+class PaymentRefundSerializer(serializers.ModelSerializer):
+    transactionId = serializers.CharField(source="transaction_id", read_only=True)
+    refundedAt = serializers.DateTimeField(source="created_at", read_only=True)
+
+    class Meta:
+        model = PaymentRefund
+        fields = ["amount", "transactionId", "refundedAt"]
+        read_only_fields = fields
 
 
 class RefundRequestSerializer(serializers.ModelSerializer):
@@ -8,10 +19,11 @@ class RefundRequestSerializer(serializers.ModelSerializer):
     requestedAt = serializers.DateTimeField(source="requested_at", read_only=True)
     decidedAt = serializers.DateTimeField(source="decided_at", read_only=True)
     receivedAt = serializers.DateTimeField(source="received_at", read_only=True)
+    paymentRefund = PaymentRefundSerializer(source="payment_refund", read_only=True)
 
     class Meta:
         model = RefundRequest
-        fields = ["id", "orderItemId", "reason", "status", "amount", "requestedAt", "receivedAt", "decidedAt"]
+        fields = ["id", "orderItemId", "reason", "status", "amount", "requestedAt", "receivedAt", "decidedAt", "paymentRefund"]
         read_only_fields = fields
 
 

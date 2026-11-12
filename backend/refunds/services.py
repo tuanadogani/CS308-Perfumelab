@@ -9,6 +9,7 @@ from django.utils import timezone
 from accounts.models import Role
 from catalog.models import Product
 from orders.models import Order, OrderItem, OrderStatus
+from payments.services import refund_payment
 
 from .models import RefundRequest, RefundStatus
 
@@ -68,6 +69,7 @@ def decide_refund(refund, manager, approve):
             raise ValidationError("The returned product must be received before approval.")
         if order.status != OrderStatus.DELIVERED:
             raise ValidationError("Only delivered orders can be refunded.")
+        refund_payment(refund)
     refund.status = RefundStatus.APPROVED if approve else RefundStatus.REJECTED
     refund.decided_by = manager
     refund.decided_at = timezone.now()
@@ -80,9 +82,9 @@ def decide_refund(refund, manager, approve):
         if not order.items.exclude(refund__status=RefundStatus.APPROVED).exists():
             order.status = OrderStatus.REFUNDED
             order.save(update_fields=["status"])
-        send_mail(
+        transaction.on_commit(lambda: send_mail(
             "Your refund was approved",
             f"We refunded {refund.amount} TL for {item.product.name}.",
             None, [order.user.email], fail_silently=True,
-        )
+        ), robust=True)
     return refund
