@@ -7,7 +7,7 @@ from django.db.models import F
 from django.utils import timezone
 
 from catalog.models import Product
-from orders.models import Order, OrderStatus
+from orders.models import Order, OrderItem, OrderStatus
 
 from .models import RefundRequest, RefundStatus
 
@@ -17,7 +17,10 @@ REFUND_WINDOW = timedelta(days=30)
 @transaction.atomic
 def request_refund(user, order_item, reason=""):
     """Customer asks to return a delivered item within 30 days of purchase (req 16)."""
-    order = Order.objects.get(pk=order_item.order_id)  # fresh status, not a cached copy
+    # Serialize requests for an order so duplicate submissions return a validation
+    # error rather than racing into the database's one-to-one constraint.
+    order = Order.objects.select_for_update().get(pk=order_item.order_id)
+    order_item = OrderItem.objects.get(pk=order_item.pk, order=order)
     if order.user_id != user.pk:
         raise PermissionDenied("This is not your order.")
     if order.status != OrderStatus.DELIVERED:

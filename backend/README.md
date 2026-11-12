@@ -91,10 +91,11 @@ For local integration, verify `/api/health/`, product browsing, registration, lo
 
 ## Remaining integration work
 
-Customer cart/checkout, payments, refunds and review submission still need HTTP API
-and frontend integration. The frontend cart uses localStorage, checkout shows a placeholder,
-and admin screens are skeletons. Product manager backend APIs are available (see below).
-Payments currently use a mock bank.
+Customer cart/checkout, payments and review submission still need HTTP API
+and frontend integration. Customer order history, cancellation and refund request APIs
+are available (see below); their frontend integration and sales-manager refund APIs
+are pending. The frontend cart uses localStorage and checkout shows a placeholder.
+Product manager backend APIs are available (see below). Payments currently use a mock bank.
 
 ## Wishlist
 
@@ -131,3 +132,33 @@ New products start at price/base price 0; pricing and discounts belong to the sa
 Existing prices are preserved during product manager updates. No database migration is needed.
 
 Run regression tests with `python manage.py test catalog orders reviews`.
+
+## Customer orders and refund requests
+
+These routes require a customer account Bearer token. Other roles receive 403;
+orders and items belonging to another customer receive 404.
+
+- `GET /api/orders/` — current customer's orders, newest first, with purchased items and their refund status.
+- `GET /api/orders/<id>/` — one owned order, its delivery status and purchase-time prices.
+- `POST /api/orders/<id>/cancel/` — cancel only a `processing` order and restore its stock once.
+- `POST /api/orders/<id>/items/<item_id>/refund/` — request a return for one purchased order line; optional JSON `{ "reason": "Not my scent" }` (maximum 2000 characters).
+
+Refund requests require a `delivered` order and must be made within 30 days of
+`createdAt` (purchase time, not delivery time). Exactly 30 days is accepted.
+Each order line can have one request; all units on that line are returned together.
+The amount is calculated from the stored `unit_price × quantity`, including any
+purchase-time discount. Client-supplied amounts/statuses cannot override it.
+Creating a request does not refund money, restock products or cancel the order.
+Invalid lifecycle actions and duplicate requests return 400.
+
+Order responses use camelCase keys (`shippingAddress`, `createdAt`, `deliveredAt`,
+`productId`, `productName`, `unitPrice`, `lineTotal`). Monetary values in these
+customer routes are decimal strings. Each item has `refund: null` or a refund
+object containing `id`, `orderItemId`, `reason`, `status`, `amount`, `requestedAt`
+and `decidedAt`. Internal product cost is excluded.
+
+These APIs operate on existing orders. Customer cart/checkout HTTP integration is
+still pending. The existing refund decision service is not exposed by these routes;
+sales-manager receipt/decision APIs and payment refund processing are subsequent work.
+
+Run `python manage.py test orders refunds --keepdb` for regression coverage.
