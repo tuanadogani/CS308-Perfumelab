@@ -1,4 +1,5 @@
 import threading
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.db import connection
@@ -10,7 +11,9 @@ from cart.services import add_to_cart
 from catalog.factories import make_product, make_user
 
 from .invoices import FONT, FONT_BOLD, render_invoice_pdf
-from .models import Delivery, Order, OrderStatus
+from refunds.models import RefundRequest
+
+from .models import Delivery, Order, OrderItem, OrderStatus
 from .services import advance_status, cancel_order, place_order
 
 
@@ -339,3 +342,147 @@ class InvoicePdfTests(TestCase):
     def test_invoice_render_is_deterministic(self):
         # the stored SHA-256 only stays valid if every render is byte-identical
         self.assertEqual(render_invoice_pdf(self.order.invoice), render_invoice_pdf(self.order.invoice))
+
+
+class CustomerOrderApiTests(APITestCase):
+    def setUp(self):
+        self.user, self.other = make_user(), make_user()
+        self.product = make_product(stock=10)
+        self.order = place_order(self.user, cart_with(self.user, self.product, 2))
+        self.item = self.order.items.get()
+        self.base = f"/api/orders/{self.order.pk}/"
+        self.refund_url = f"{self.base}items/{self.item.pk}/refund/"
+        self.client.force_authenticate(self.user)
+        self.routes = [("get", "/api/orders/"), ("get", self.base),
+                       ("post", self.base + "cancel/"), ("post", self.refund_url)]
+
+    def deliver(self):
+        advance_status(self.order)
+        advance_status(self.order)
+
+    def test_authentication_required(self):
+        self.client.force_authenticate(None)
+        for method, url in self.routes:
+            with self.subTest(url=url):
+                self.assertEqual(getattr(self.client, method)(url).status_code, 401)
+
+    def test_staff_roles_rejected(self):
+        for role in ("sales_manager", "product_manager", "support_agent"):
+            self.client.force_authenticate(make_user(role))
+            for method, url in self.routes:
+                with self.subTest(role=role, url=url):
+                    self.assertEqual(getattr(self.client, method)(url).status_code, 403)
+
+    def test_history_is_owned_and_newest_first(self):
+        place_order(self.other, cart_with(self.other, self.product))
+        newer = place_order(self.user, cart_with(self.user, self.product))
+        response = self.client.get("/api/orders/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row["id"] for row in response.data], [newer.pk, self.order.pk])
+
+    def test_empty_history(self):
+        self.client.force_authenticate(self.other)
+        self.assertEqual(self.client.get("/api/orders/").data, [])
+
+    def test_detail_preserves_purchase_price_and_hides_cost(self):
+        self.product.apply_discount(50)
+        response = self.client.get(self.base)
+        self.assertEqual(response.status_code, 200)
+        item = response.data["items"][0]
+        self.assertEqual(item["unitPrice"], "1000.00")
+        self.assertEqual(item["lineTotal"], "2000.00")
+        self.assertIsNone(item["refund"])
+        self.assertNotIn("unitCost", item)
+        self.assertNotIn("unit_cost", item)
+
+    def test_other_customers_order_hidden(self):
+        self.client.force_authenticate(self.other)
+        for method, url in self.routes[1:]:
+            with self.subTest(url=url):
+                self.assertEqual(getattr(self.client, method)(url).status_code, 404)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, OrderStatus.PROCESSING)
+        self.assertFalse(RefundRequest.objects.exists())
+
+    def test_cancel_processing_order_once(self):
+        response = self.client.post(self.base + "cancel/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], OrderStatus.CANCELLED)
+        self.assertEqual(self.client.post(self.base + "cancel/").status_code, 400)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 10)
+
+    def test_cancel_rejected_for_other_statuses(self):
+        for state in (OrderStatus.IN_TRANSIT, OrderStatus.DELIVERED, OrderStatus.CANCELLED, OrderStatus.REFUNDED):
+            Order.objects.filter(pk=self.order.pk).update(status=state)
+            with self.subTest(state=state):
+                self.assertEqual(self.client.post(self.base + "cancel/").status_code, 400)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, 8)
+
+    def test_refund_requires_delivered(self):
+        for state in (OrderStatus.PROCESSING, OrderStatus.IN_TRANSIT, OrderStatus.CANCELLED, OrderStatus.REFUNDED):
+            Order.objects.filter(pk=self.order.pk).update(status=state)
+            with self.subTest(state=state):
+                self.assertEqual(self.client.post(self.refund_url).status_code, 400)
+        self.assertFalse(RefundRequest.objects.exists())
+
+    def test_refund_selects_one_line_and_waits_for_approval(self):
+        untouched = OrderItem.objects.create(order=self.order, product=make_product(), quantity=1,
+                                             unit_price=1000, unit_cost=500)
+        self.deliver()
+        response = self.client.post(self.refund_url, {"reason": "Not my scent", "amount": "1.00"})
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["amount"], "2000.00")
+        self.assertEqual(response.data["status"], "requested")
+        self.assertEqual(response.data["reason"], "Not my scent")
+        self.assertFalse(RefundRequest.objects.filter(order_item=untouched).exists())
+        self.product.refresh_from_db()
+        self.order.refresh_from_db()
+        self.assertEqual(self.product.stock, 8)
+        self.assertEqual(self.order.status, OrderStatus.DELIVERED)
+        items = self.client.get(self.base).data["items"]
+        selected = next(item for item in items if item["id"] == self.item.pk)
+        self.assertEqual(selected["refund"]["id"], response.data["id"])
+
+    def test_duplicate_request_returns_400(self):
+        self.deliver()
+        self.assertEqual(self.client.post(self.refund_url).status_code, 201)
+        self.assertEqual(self.client.post(self.refund_url).status_code, 400)
+        self.assertEqual(RefundRequest.objects.count(), 1)
+
+    def test_exact_30_day_boundary(self):
+        self.deliver()
+        now = timezone.now()
+        Order.objects.filter(pk=self.order.pk).update(created_at=now - timedelta(days=30))
+        with patch("refunds.services.timezone.now", return_value=now):
+            self.assertEqual(self.client.post(self.refund_url).status_code, 201)
+
+    def test_expired_purchase_rejected_even_if_delivered_today(self):
+        self.deliver()
+        now = timezone.now()
+        Order.objects.filter(pk=self.order.pk).update(created_at=now - timedelta(days=30, microseconds=1))
+        with patch("refunds.services.timezone.now", return_value=now):
+            self.assertEqual(self.client.post(self.refund_url).status_code, 400)
+        self.assertFalse(RefundRequest.objects.exists())
+
+    def test_item_must_belong_to_url_order(self):
+        other_order = place_order(self.user, cart_with(self.user, self.product))
+        url = f"/api/orders/{other_order.pk}/items/{self.item.pk}/refund/"
+        self.assertEqual(self.client.post(url).status_code, 404)
+
+    def test_campaign_end_does_not_change_refund(self):
+        self.product.apply_discount(30)
+        order = place_order(self.user, cart_with(self.user, self.product))
+        advance_status(order)
+        advance_status(order)
+        self.product.apply_discount(0)
+        url = f"/api/orders/{order.pk}/items/{order.items.get().pk}/refund/"
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["amount"], "700.00")
+
+    def test_invalid_reason_rejected(self):
+        self.deliver()
+        self.assertEqual(self.client.post(self.refund_url, {"reason": "x" * 2001}).status_code, 400)
+        self.assertFalse(RefundRequest.objects.exists())
