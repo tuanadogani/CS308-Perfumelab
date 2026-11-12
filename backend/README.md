@@ -93,8 +93,8 @@ For local integration, verify `/api/health/`, product browsing, registration, lo
 
 Customer cart/checkout, payments and review submission still need HTTP API
 and frontend integration. Customer order history, cancellation and refund request APIs
-are available (see below); their frontend integration and sales-manager refund APIs
-are pending. The frontend cart uses localStorage and checkout shows a placeholder.
+are available along with sales-manager return review APIs (see below); their frontend
+integration is pending. The frontend cart uses localStorage and checkout shows a placeholder.
 Product manager backend APIs are available (see below). Payments currently use a mock bank.
 
 ## Wishlist
@@ -154,11 +154,36 @@ Invalid lifecycle actions and duplicate requests return 400.
 Order responses use camelCase keys (`shippingAddress`, `createdAt`, `deliveredAt`,
 `productId`, `productName`, `unitPrice`, `lineTotal`). Monetary values in these
 customer routes are decimal strings. Each item has `refund: null` or a refund
-object containing `id`, `orderItemId`, `reason`, `status`, `amount`, `requestedAt`
-and `decidedAt`. Internal product cost is excluded.
+object containing `id`, `orderItemId`, `reason`, `status`, `amount`, `requestedAt`,
+`receivedAt` and `decidedAt`. Internal product cost is excluded.
 
 These APIs operate on existing orders. Customer cart/checkout HTTP integration is
-still pending. The existing refund decision service is not exposed by these routes;
-sales-manager receipt/decision APIs and payment refund processing are subsequent work.
+still pending. Payment refund processing is subsequent work.
 
 Run `python manage.py test orders refunds --keepdb` for regression coverage.
+
+## Sales manager return review
+
+Apply the receipt migration with `python manage.py migrate` before using these APIs.
+All routes require a `sales_manager` Bearer token (401 when unauthenticated, 403 for
+other roles, 404 for an unknown refund ID).
+
+- `GET /api/sales/refunds/` — all requests, newest first; optional `?status=requested`, `approved` or `rejected`. Invalid status filters return 400.
+- `GET /api/sales/refunds/<id>/` — one request, customer/order/product details, purchased quantity and price, receipt and decision records.
+- `POST /api/sales/refunds/<id>/receive/` — record that the physical return arrived at the store. No body is required. Repeating receipt while the request is pending preserves the original receiver and timestamp.
+- `POST /api/sales/refunds/<id>/decision/` — JSON `{ "approve": true }` or `{ "approve": false }`. Approval requires a receipt record and a currently delivered order. Rejection does not require receipt.
+
+Responses include the customer refund fields plus `orderId`, `customerId`,
+`customerName`, `customerEmail`, `productId`, `productName`, `quantity`, `unitPrice`,
+`receivedBy` and `decidedBy`. Monetary values are decimal strings. Receipt and
+decision timestamps and manager IDs are assigned by the server.
+
+Receipt does not change stock, payment or order status. Approval restores only the
+selected line's quantity; the order becomes `refunded` once all its lines are
+approved. Rejected requests keep stock and order status unchanged. Decided requests
+cannot be received or decided again (400). The 30-day eligibility window applies
+when the customer requests the return, so a timely request can be decided later.
+
+Approval currently uses the existing restock and email service. It does **not** yet
+issue a bank refund or store a refund transaction; that payment integration and
+moving notification delivery after transaction commit are planned for the next commit.
