@@ -27,3 +27,6 @@ export async function request(path, { method = 'GET', body, headers = {} } = {})
 
 // Simulates network latency for the mocks
 export const delay = (ms = 300) => new Promise((r) => setTimeout(r, ms));
+
+// Alias for backward compatibility
+export const apiClient = request;
