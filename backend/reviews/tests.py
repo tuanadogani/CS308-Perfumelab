@@ -144,3 +144,59 @@ class CommentApiTests(APITestCase):
         self.product.active = False
         self.product.save(update_fields=["active"])
         self.assertEqual(self.client.get(self.url).status_code, 404)
+
+
+class RatingApiTests(APITestCase):
+    def setUp(self):
+        self.customer = make_user()
+        self.product = make_product()
+        self.url = f"/api/products/{self.product.pk}/rating/"
+
+    def test_guest_cannot_rate(self):
+        self.assertEqual(self.client.put(self.url, {"score": 5}, format="json").status_code, 401)
+
+    def test_customer_can_rate_after_delivery(self):
+        buy(self.customer, self.product)
+        self.client.force_authenticate(self.customer)
+        response = self.client.put(self.url, {"score": 4}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {"score": 4})
+        self.assertEqual(Rating.objects.get(user=self.customer, product=self.product).score, 4)
+
+    def test_cannot_rate_before_delivery(self):
+        buy(self.customer, self.product, deliver=False)
+        self.client.force_authenticate(self.customer)
+        response = self.client.put(self.url, {"score": 5}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Rating.objects.exists())
+
+    def test_score_must_be_between_1_and_5(self):
+        buy(self.customer, self.product)
+        self.client.force_authenticate(self.customer)
+        for bad in (0, 6, "abc"):
+            response = self.client.put(self.url, {"score": bad}, format="json")
+            self.assertEqual(response.status_code, 400)
+        self.assertFalse(Rating.objects.exists())
+
+    def test_rating_again_updates_existing_rating(self):
+        buy(self.customer, self.product)
+        self.client.force_authenticate(self.customer)
+        self.client.put(self.url, {"score": 2}, format="json")
+        self.client.put(self.url, {"score": 5}, format="json")
+        self.assertEqual(Rating.objects.filter(user=self.customer).count(), 1)
+        self.assertEqual(self.client.get(self.url).data, {"score": 5})
+
+    def test_get_returns_null_when_not_rated(self):
+        self.client.force_authenticate(self.customer)
+        self.assertEqual(self.client.get(self.url).data, {"score": None})
+
+    def test_rating_is_live_in_product_average(self):
+        buy(self.customer, self.product)
+        self.client.force_authenticate(self.customer)
+        self.client.put(self.url, {"score": 3}, format="json")
+        self.assertEqual(self.client.get(f"/api/products/{self.product.pk}/").data["rating"], 3.0)
+
+    def test_staff_roles_cannot_rate(self):
+        for role in ("sales_manager", "product_manager", "support_agent"):
+            self.client.force_authenticate(make_user(role))
+            self.assertEqual(self.client.put(self.url, {"score": 5}, format="json").status_code, 403)

@@ -17,3 +17,9 @@ class CommentSerializer(serializers.ModelSerializer):
 
 class CreateCommentSerializer(serializers.Serializer):
     text = serializers.CharField(max_length=2000)
+
+
+class RatingSerializer(serializers.Serializer):
+    """1-5 stars (req 5). Ratings are live at once, no approval needed."""
+
+    score = serializers.IntegerField(min_value=1, max_value=5)

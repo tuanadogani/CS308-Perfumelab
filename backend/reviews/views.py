@@ -7,8 +7,9 @@ from rest_framework.views import APIView
 from accounts.permissions import IsCustomer
 from catalog.models import Product
 
-from .serializers import CommentSerializer, CreateCommentSerializer
-from .services import submit_comment, visible_comments
+from .models import Rating
+from .serializers import CommentSerializer, CreateCommentSerializer, RatingSerializer
+from .services import submit_comment, submit_rating, visible_comments
 
 
 class ProductCommentsView(APIView):
@@ -34,3 +35,24 @@ class ProductCommentsView(APIView):
             return Response({"message": " ".join(exc.messages)}, status=400)
         # New comments stay hidden until a product manager approves them.
         return Response(CommentSerializer(comment).data, status=201)
+
+
+class ProductRatingView(APIView):
+    """GET: the customer's own rating for this product. PUT: give or change a 1-5 star rating (req 5)."""
+
+    permission_classes = [IsCustomer]
+
+    def get(self, request, pk):
+        product = get_object_or_404(Product, pk=pk, active=True)
+        rating = Rating.objects.filter(user=request.user, product=product).first()
+        return Response({"score": rating.score if rating else None})
+
+    def put(self, request, pk):
+        product = get_object_or_404(Product, pk=pk, active=True)
+        serializer = RatingSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            rating = submit_rating(request.user, product, serializer.validated_data["score"])
+        except ValidationError as exc:
+            return Response({"message": " ".join(exc.messages)}, status=400)
+        return Response({"score": rating.score})
