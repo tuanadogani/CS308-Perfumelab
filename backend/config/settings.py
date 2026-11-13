@@ -18,6 +18,7 @@ ALLOWED_HOSTS = [host.strip() for host in os.environ.get(
 
 INSTALLED_APPS = [
     "accounts",
+    "products",
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
