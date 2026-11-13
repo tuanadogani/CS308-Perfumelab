@@ -1,6 +1,7 @@
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from rest_framework.test import APITestCase
 
 from cart.models import Cart
 from cart.services import add_to_cart
@@ -81,3 +82,121 @@ class ReviewRulesTests(TestCase):
         submit_rating(self.user, self.product, 4)
         data = self.client.get(f"/api/products/{self.product.pk}/").json()
         self.assertEqual(data["rating"], 4.0)
+
+
+class CommentApiTests(APITestCase):
+    def setUp(self):
+        self.customer = make_user(name="Ayşe Yılmaz")
+        self.product = make_product()
+        self.url = f"/api/products/{self.product.pk}/comments/"
+
+    def test_guest_sees_only_approved_comments(self):
+        buy(self.customer, self.product)
+        approved = submit_comment(self.customer, self.product, "Lovely scent")
+        submit_comment(self.customer, self.product, "Still waiting")
+        review_comment(approved, make_user("product_manager"), approve=True)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([c["text"] for c in response.data], ["Lovely scent"])
+
+    def test_comment_shows_name_but_not_email(self):
+        buy(self.customer, self.product)
+        comment = submit_comment(self.customer, self.product, "Nice")
+        review_comment(comment, make_user("product_manager"), approve=True)
+        data = self.client.get(self.url).data[0]
+        self.assertEqual(data["customerName"], "Ayşe Yılmaz")
+        self.assertNotIn(self.customer.email, str(data))
+
+    def test_guest_cannot_post_comment(self):
+        response = self.client.post(self.url, {"text": "Hi"}, format="json")
+        self.assertEqual(response.status_code, 401)
+
+    def test_customer_can_comment_after_delivery_and_it_waits_for_approval(self):
+        buy(self.customer, self.product)
+        self.client.force_authenticate(self.customer)
+        response = self.client.post(self.url, {"text": "  Smells great  "}, format="json")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["text"], "Smells great")
+        self.assertFalse(response.data["approved"])
+        self.assertEqual(self.client.get(self.url).data, [])
+
+    def test_cannot_comment_before_delivery(self):
+        buy(self.customer, self.product, deliver=False)
+        self.client.force_authenticate(self.customer)
+        response = self.client.post(self.url, {"text": "Too early"}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("delivered", response.data["message"])
+
+    def test_empty_comment_rejected(self):
+        buy(self.customer, self.product)
+        self.client.force_authenticate(self.customer)
+        response = self.client.post(self.url, {"text": "   "}, format="json")
+        self.assertEqual(response.status_code, 400)
+
+    def test_staff_roles_cannot_post_comments(self):
+        for role in ("sales_manager", "product_manager", "support_agent"):
+            self.client.force_authenticate(make_user(role))
+            response = self.client.post(self.url, {"text": "Hi"}, format="json")
+            self.assertEqual(response.status_code, 403)
+
+    def test_unknown_or_inactive_product_returns_404(self):
+        self.assertEqual(self.client.get("/api/products/999999/comments/").status_code, 404)
+        self.product.active = False
+        self.product.save(update_fields=["active"])
+        self.assertEqual(self.client.get(self.url).status_code, 404)
+
+
+class RatingApiTests(APITestCase):
+    def setUp(self):
+        self.customer = make_user()
+        self.product = make_product()
+        self.url = f"/api/products/{self.product.pk}/rating/"
+
+    def test_guest_cannot_rate(self):
+        self.assertEqual(self.client.put(self.url, {"score": 5}, format="json").status_code, 401)
+
+    def test_customer_can_rate_after_delivery(self):
+        buy(self.customer, self.product)
+        self.client.force_authenticate(self.customer)
+        response = self.client.put(self.url, {"score": 4}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {"score": 4})
+        self.assertEqual(Rating.objects.get(user=self.customer, product=self.product).score, 4)
+
+    def test_cannot_rate_before_delivery(self):
+        buy(self.customer, self.product, deliver=False)
+        self.client.force_authenticate(self.customer)
+        response = self.client.put(self.url, {"score": 5}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Rating.objects.exists())
+
+    def test_score_must_be_between_1_and_5(self):
+        buy(self.customer, self.product)
+        self.client.force_authenticate(self.customer)
+        for bad in (0, 6, "abc"):
+            response = self.client.put(self.url, {"score": bad}, format="json")
+            self.assertEqual(response.status_code, 400)
+        self.assertFalse(Rating.objects.exists())
+
+    def test_rating_again_updates_existing_rating(self):
+        buy(self.customer, self.product)
+        self.client.force_authenticate(self.customer)
+        self.client.put(self.url, {"score": 2}, format="json")
+        self.client.put(self.url, {"score": 5}, format="json")
+        self.assertEqual(Rating.objects.filter(user=self.customer).count(), 1)
+        self.assertEqual(self.client.get(self.url).data, {"score": 5})
+
+    def test_get_returns_null_when_not_rated(self):
+        self.client.force_authenticate(self.customer)
+        self.assertEqual(self.client.get(self.url).data, {"score": None})
+
+    def test_rating_is_live_in_product_average(self):
+        buy(self.customer, self.product)
+        self.client.force_authenticate(self.customer)
+        self.client.put(self.url, {"score": 3}, format="json")
+        self.assertEqual(self.client.get(f"/api/products/{self.product.pk}/").data["rating"], 3.0)
+
+    def test_staff_roles_cannot_rate(self):
+        for role in ("sales_manager", "product_manager", "support_agent"):
+            self.client.force_authenticate(make_user(role))
+            self.assertEqual(self.client.put(self.url, {"score": 5}, format="json").status_code, 403)
