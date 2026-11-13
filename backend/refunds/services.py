@@ -1,7 +1,6 @@
 from datetime import timedelta
 
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
@@ -12,6 +11,7 @@ from orders.models import Order, OrderItem, OrderStatus
 from payments.services import refund_payment
 
 from .models import RefundRequest, RefundStatus
+from .notifications import notify_refund_approved
 
 REFUND_WINDOW = timedelta(days=30)
 
@@ -54,7 +54,7 @@ def receive_return(refund, manager):
 
 @transaction.atomic
 def decide_refund(refund, manager, approve):
-    """Sales manager approves after the product is back in the store: restock + email (req 16)."""
+    """Sales manager decides a return; approval refunds, restocks and notifies (req 16)."""
     if manager.role != Role.SALES_MANAGER:
         raise PermissionDenied("Only sales managers can decide refunds.")
     # Serialize decisions for different lines of the same order as well, so the
@@ -69,7 +69,7 @@ def decide_refund(refund, manager, approve):
             raise ValidationError("The returned product must be received before approval.")
         if order.status != OrderStatus.DELIVERED:
             raise ValidationError("Only delivered orders can be refunded.")
-        refund_payment(refund)
+        payment_refund = refund_payment(refund)
     refund.status = RefundStatus.APPROVED if approve else RefundStatus.REJECTED
     refund.decided_by = manager
     refund.decided_at = timezone.now()
@@ -82,9 +82,5 @@ def decide_refund(refund, manager, approve):
         if not order.items.exclude(refund__status=RefundStatus.APPROVED).exists():
             order.status = OrderStatus.REFUNDED
             order.save(update_fields=["status"])
-        transaction.on_commit(lambda: send_mail(
-            "Your refund was approved",
-            f"We refunded {refund.amount} TL for {item.product.name}.",
-            None, [order.user.email], fail_silently=True,
-        ), robust=True)
+        notify_refund_approved(refund, payment_refund)
     return refund
