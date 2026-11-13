@@ -5,13 +5,21 @@ from django.utils import timezone
 
 from catalog.models import Product
 
-from .models import Delivery, Invoice, Order, OrderItem, OrderStatus
+from .models import Delivery, Invoice, InvoiceCounter, Order, OrderItem, OrderStatus
 
 # Allowed forward moves for the product manager (req 12). Cancelling is the customer's own action.
 NEXT_STATUS = {
     OrderStatus.PROCESSING: OrderStatus.IN_TRANSIT,
     OrderStatus.IN_TRANSIT: OrderStatus.DELIVERED,
 }
+
+
+def next_invoice_number():
+    """Next gapless invoice number. Must run inside the checkout transaction."""
+    counter, _ = InvoiceCounter.objects.select_for_update().get_or_create(name="invoice")
+    counter.last += 1
+    counter.save(update_fields=["last"])
+    return f"INV-{counter.last:07d}"
 
 
 @transaction.atomic
@@ -54,7 +62,7 @@ def place_order(user, cart, card=None, shipping_address=None):
         total += item.line_total
     order.total = total
     order.save(update_fields=["total"])
-    Invoice.objects.create(order=order, number=f"INV-{order.pk:07d}", total=total)
+    Invoice.objects.create(order=order, number=next_invoice_number(), total=total)
     cart.items.all().delete()
     return order
 

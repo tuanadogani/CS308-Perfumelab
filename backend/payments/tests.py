@@ -196,3 +196,66 @@ class InvoiceEmailTests(TestCase):
         from django.core import mail
         self.assertTrue(mail.outbox[0].from_email)
 
+
+class CheckoutDatabaseTests(TestCase):
+    """Checkout tables: gapless invoice numbers and price/amount checks."""
+    NUMBER = "4242 4242 4242 4242"
+    DECLINE = "4000 0000 0000 0002"
+
+    def setUp(self):
+        from catalog.factories import make_product, make_user
+        from cart.models import Cart
+        from payments.models import CreditCard
+        self.user = make_user()
+        self.product = make_product(price="100.00", stock=10)
+        self.cart = Cart.objects.create(user=self.user)
+        self.card = CreditCard.from_number(self.user, self.NUMBER, "Card Holder", 12, 2030)
+        self.bad = CreditCard.from_number(self.user, self.DECLINE, "Card Holder", 12, 2030)
+
+    def buy(self, card=None, number=None):
+        from cart.services import add_to_cart
+        from payments.services import checkout
+        add_to_cart(self.cart, self.product, 1)
+        return checkout(self.user, self.cart, card or self.card, number or self.NUMBER, shipping_address="Istanbul")
+
+    def test_declined_payment_leaves_no_gap_in_invoice_numbers(self):
+        from payments.bank import PaymentDeclined
+        first = self.buy()
+        with self.assertRaises(PaymentDeclined):
+            self.buy(self.bad, self.DECLINE)
+        self.cart.items.all().delete()
+        second = self.buy()
+        n1 = int(first.invoice.number.split("-")[1])
+        n2 = int(second.invoice.number.split("-")[1])
+        self.assertEqual(n2, n1 + 1)
+        self.assertGreater(second.pk, first.pk + 1)  # the order id DID skip one
+
+    def test_counter_continues_after_existing_invoices(self):
+        from orders.models import InvoiceCounter
+        InvoiceCounter.objects.update_or_create(name="invoice", defaults={"last": 41})
+        self.assertEqual(self.buy().invoice.number, "INV-0000042")
+
+    def test_migration_seed_starts_after_highest_number(self):
+        import importlib
+        from django.apps import apps
+        from orders.models import InvoiceCounter
+        order = self.buy()
+        order.invoice.number = "INV-0000500"
+        order.invoice.save()
+        mig = importlib.import_module("orders.migrations.0003_invoice_counter")
+        mig.start_after_existing(apps, None)
+        self.assertEqual(InvoiceCounter.objects.get(name="invoice").last, 500)
+
+    def test_negative_unit_price_rejected_by_database(self):
+        from django.db import IntegrityError, transaction
+        from orders.models import OrderItem
+        order = self.buy()
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            OrderItem.objects.create(order=order, product=self.product, quantity=1, unit_price=-1, unit_cost=0)
+
+    def test_negative_payment_amount_rejected_by_database(self):
+        from django.db import IntegrityError, transaction
+        from payments.models import Payment
+        order = self.buy()
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Payment.objects.filter(pk=order.payment.pk).update(amount=-5)
