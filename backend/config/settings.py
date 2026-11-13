@@ -50,7 +50,11 @@ DATABASES = {
         "PASSWORD": os.environ.get("POSTGRES_PASSWORD", ""),
         "HOST": os.environ.get("POSTGRES_HOST", "127.0.0.1"),
         "PORT": os.environ.get("POSTGRES_PORT", "5432"),
-        "OPTIONS": {"connect_timeout": 5},
+        # Supabase needs SSL: set POSTGRES_SSLMODE=require (local Postgres: leave it as prefer).
+        "OPTIONS": {"connect_timeout": 5, "sslmode": os.environ.get("POSTGRES_SSLMODE", "prefer")},
+        "CONN_MAX_AGE": int(os.environ.get("POSTGRES_CONN_MAX_AGE", "0")),
+        # Supabase's transaction pooler (port 6543) cannot keep server-side cursors open.
+        "DISABLE_SERVER_SIDE_CURSORS": os.environ.get("POSTGRES_PORT", "5432") == "6543",
     }
 }
 AUTH_PASSWORD_VALIDATORS = [
