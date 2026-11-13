@@ -85,10 +85,6 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGINS = [origin.strip() for origin in os.environ.get(
     "CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173"
 ).split(",") if origin.strip()]
-# The guest cart id travels in this header (see cart/views.py); browsers need it allowed.
-from corsheaders.defaults import default_headers  # noqa: E402
-CORS_ALLOW_HEADERS = (*default_headers, "x-cart-key")
-
 # Key for encrypted fields such as User.tax_id (blank = derived from DJANGO_SECRET_KEY).
 FIELD_ENCRYPTION_KEY = os.environ.get("FIELD_ENCRYPTION_KEY", "")
 
