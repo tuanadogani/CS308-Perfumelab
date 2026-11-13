@@ -16,6 +16,7 @@ from orders.models import Order, OrderStatus
 from orders.services import advance_status, place_order
 from payments.models import CreditCard, PaymentRefund
 from payments.services import checkout
+from wishlist.models import Notification
 from wishlist.services import set_discount
 
 from .models import RefundRequest, RefundStatus
@@ -397,6 +398,8 @@ class RefundConcurrencyTests(TransactionTestCase):
             self.assertEqual(mocked.call_count, 1)
         self.assertCountEqual(results, ["approved", "already decided"])
         self.assertEqual(PaymentRefund.objects.filter(refund_request=refund).count(), 1)
+        self.assertEqual(Notification.objects.filter(user=customer).count(), 1)
+        self.assertEqual(sum(message.subject == "Your refund was approved" for message in mail.outbox), 1)
         product.refresh_from_db()
         self.assertEqual(product.stock, 5)
 
@@ -560,3 +563,134 @@ class RefundPaymentTests(APITestCase):
         receive_return(refund, self.manager)
         decide_refund(refund, self.manager, approve=True)
         self.assertEqual(PaymentRefund.objects.get(refund_request=refund).amount, 0)
+
+
+class RefundNotificationTests(APITestCase):
+    def setUp(self):
+        self.customer, self.manager = make_user(), make_user("sales_manager")
+        self.product = make_product(price="1000.00", stock=5)
+        self.product.apply_discount(30)
+        self.order = delivered_order(self.customer, self.product, 2)
+        self.product.apply_discount(0)
+        self.refund = request_refund(self.customer, self.order.items.get())
+        receive_return(self.refund, self.manager)
+        self.client.force_authenticate(self.manager)
+        self.url = f"/api/sales/refunds/{self.refund.pk}/decision/"
+
+    def test_approval_notifies_customer_with_discounted_amount_after_commit(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(self.url, {"approve": True}, format="json")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(len(mail.outbox), 0)
+            self.assertEqual(Notification.objects.filter(user=self.customer).count(), 1)
+        self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+        self.assertEqual(email.to, [self.customer.email])
+        for expected in ("1400.00 TL", self.product.name, f"order #{self.order.pk}",
+                         "Quantity: 2", PaymentRefund.objects.get().transaction_id):
+            self.assertIn(expected, email.body)
+        note = Notification.objects.get(user=self.customer)
+        self.assertEqual(note.product_id, self.product.pk)
+        self.assertFalse(note.read)
+        self.assertIn("1400.00 TL", note.message)
+        self.assertIn(f"order #{self.order.pk}", note.message)
+        self.assertFalse(Notification.objects.filter(user=self.manager).exists())
+
+    def test_email_exception_preserves_refund_and_in_app_notification(self):
+        with patch("refunds.notifications.send_mail", side_effect=RuntimeError("SMTP unavailable")):
+            with self.assertLogs("refunds.notifications", level="ERROR"):
+                with self.captureOnCommitCallbacks(execute=True):
+                    response = self.client.post(self.url, {"approve": True}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.refund.refresh_from_db()
+        self.order.refresh_from_db()
+        self.product.refresh_from_db()
+        self.assertEqual(self.refund.status, RefundStatus.APPROVED)
+        self.assertEqual(self.order.status, OrderStatus.REFUNDED)
+        self.assertEqual(self.product.stock, 5)
+        self.assertEqual(PaymentRefund.objects.get().amount, 1400)
+        self.assertEqual(Notification.objects.filter(user=self.customer).count(), 1)
+
+    def test_zero_email_delivery_is_logged(self):
+        with patch("refunds.notifications.send_mail", return_value=0):
+            with self.assertLogs("refunds.notifications", level="WARNING"):
+                with self.captureOnCommitCallbacks(execute=True):
+                    decide_refund(self.refund, self.manager, approve=True)
+        self.assertEqual(Notification.objects.count(), 1)
+        self.assertEqual(PaymentRefund.objects.count(), 1)
+
+    def test_customer_can_read_alert_but_other_users_cannot_access_it(self):
+        decide_refund(self.refund, self.manager, approve=True)
+        note = Notification.objects.get(user=self.customer)
+        self.client.force_authenticate(self.customer)
+        response = self.client.get("/api/notifications/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]["id"], note.pk)
+        self.assertIn("1400.00 TL", response.data[0]["message"])
+        self.assertEqual(self.client.post(f"/api/notifications/{note.pk}/read/").status_code, 200)
+        note.refresh_from_db()
+        self.assertTrue(note.read)
+        self.client.force_authenticate(make_user())
+        self.assertEqual(self.client.get("/api/notifications/").data, [])
+        self.assertEqual(self.client.post(f"/api/notifications/{note.pk}/read/").status_code, 404)
+
+    def test_repeated_decision_produces_one_email_and_alert(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(self.client.post(self.url, {"approve": True}, format="json").status_code, 200)
+            for approve in (True, False):
+                self.assertEqual(self.client.post(self.url, {"approve": approve}, format="json").status_code, 400)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(Notification.objects.count(), 1)
+
+    def test_rejection_does_not_notify_approval(self):
+        with self.captureOnCommitCallbacks(execute=True) as callbacks:
+            self.assertEqual(self.client.post(self.url, {"approve": False}, format="json").status_code, 200)
+        self.assertEqual(callbacks, [])
+        self.assertFalse(Notification.objects.exists())
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_bank_failure_does_not_notify(self):
+        from payments.bank import RefundDeclined
+        with patch("payments.services.bank.refund", side_effect=RefundDeclined("Unavailable")):
+            with self.captureOnCommitCallbacks(execute=True) as callbacks:
+                response = self.client.post(self.url, {"approve": True}, format="json")
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(callbacks, [])
+        self.assertFalse(Notification.objects.exists())
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_outer_transaction_rollback_discards_alert_and_email(self):
+        from django.db import transaction
+        with self.captureOnCommitCallbacks(execute=True) as callbacks:
+            with self.assertRaises(RuntimeError):
+                with transaction.atomic():
+                    decide_refund(self.refund, self.manager, approve=True)
+                    raise RuntimeError("Rollback outer transaction")
+        self.assertEqual(callbacks, [])
+        self.assertFalse(Notification.objects.exists())
+        self.assertFalse(PaymentRefund.objects.exists())
+        self.assertEqual(len(mail.outbox), 0)
+        self.refund.refresh_from_db()
+        self.assertEqual(self.refund.status, RefundStatus.REQUESTED)
+
+    def test_notification_write_failure_rolls_back_approval(self):
+        from django.db import IntegrityError
+        with patch("refunds.notifications.Notification.objects.create", side_effect=IntegrityError("write failed")):
+            with self.captureOnCommitCallbacks(execute=True) as callbacks:
+                with self.assertRaises(IntegrityError):
+                    decide_refund(self.refund, self.manager, approve=True)
+        self.assertEqual(callbacks, [])
+        self.assertFalse(Notification.objects.exists())
+        self.assertFalse(PaymentRefund.objects.exists())
+        self.refund.refresh_from_db()
+        self.product.refresh_from_db()
+        self.assertEqual(self.refund.status, RefundStatus.REQUESTED)
+        self.assertEqual(self.product.stock, 3)
+
+    def test_long_product_name_fits_alert_without_losing_amount(self):
+        self.product.name = "P" * 200
+        self.product.save(update_fields=["name"])
+        decide_refund(self.refund, self.manager, approve=True)
+        message = Notification.objects.get().message
+        self.assertLessEqual(len(message), 300)
+        self.assertIn("1400.00 TL", message)

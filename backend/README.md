@@ -219,5 +219,33 @@ or an object such as:
 }
 ```
 
-Existing approval email is scheduled after commit; email errors cannot undo the
-refund. Application notifications and further notification handling are subsequent work.
+## Refund approval notifications
+
+Every successful approval creates one unread notification for the customer in the
+existing `wishlist.Notification` table, in the same transaction as the refund and
+stock change. The message includes the order, product and refunded amount based on
+the purchase-time discount. No new migration is needed for these notifications.
+The existing endpoints expose the alert:
+
+- `GET /api/notifications/` — only the signed-in user's notifications.
+- `POST /api/notifications/<id>/read/` — mark an owned alert as read (404 for another user's alert).
+- `POST /api/notifications/read-all/` — mark all of the user's alerts as read.
+
+Approval email is sent only after the outer database transaction commits. It includes
+the order and refund request IDs, full product name, quantity, refunded amount and
+bank refund reference. Receipt alone, rejection, failed payment and rolled-back
+approval do not send approval notifications. Repeated or concurrent decisions cannot
+create another alert or schedule another approval email.
+
+Email exceptions and zero-message delivery are logged by `refunds.notifications`.
+They do not undo the completed refund or its in-app alert. Delivery is best effort:
+there is no background queue or automatic retry, and a process exit before the
+post-commit callback can prevent the email. The in-app alert remains persisted.
+
+Email settings can be supplied through `.env`; see `.env.example`. For local inspection,
+set `EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend` to print email in
+the backend terminal (this does not deliver it to an inbox). For SMTP, select
+`django.core.mail.backends.smtp.EmailBackend` and set `EMAIL_HOST`, `EMAIL_PORT`,
+`EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL` and either
+`EMAIL_USE_TLS=true` or `EMAIL_USE_SSL=true` as required by the provider. The default
+backend remains SMTP; no SMTP service or credentials are provisioned by the app.
