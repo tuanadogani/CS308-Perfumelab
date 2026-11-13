@@ -35,7 +35,11 @@ class OrderItem(models.Model):
     unit_cost = models.DecimalField(max_digits=10, decimal_places=2)  # for profit/loss (req 11)
 
     class Meta:
-        constraints = [models.CheckConstraint(condition=Q(quantity__gte=1), name="order_item_quantity_gte_1")]
+        constraints = [
+            models.CheckConstraint(condition=Q(quantity__gte=1), name="order_item_quantity_gte_1"),
+            models.CheckConstraint(condition=Q(unit_price__gte=0), name="order_item_unit_price_gte_0"),
+            models.CheckConstraint(condition=Q(unit_cost__gte=0), name="order_item_unit_cost_gte_0"),
+        ]
 
     @property
     def line_total(self):
@@ -72,3 +76,17 @@ class Invoice(models.Model):
     issued_at = models.DateTimeField(auto_now_add=True)
     total = models.DecimalField(max_digits=12, decimal_places=2)
     pdf_sha256 = models.CharField(max_length=64, blank=True)  # integrity hash of the emailed PDF (req 17)
+
+
+class InvoiceCounter(models.Model):
+    """One row holding the last invoice number used.
+
+    Numbers used to come from the order id, but Postgres never gives an id back: when the
+    bank declined a card the order was rolled back and that invoice number was skipped
+    (INV-0000004, INV-0000006, ...). The counter row is locked and bumped inside the same
+    transaction as the order, so a declined payment rolls the bump back too and the
+    numbers stay continuous.
+    """
+
+    name = models.CharField(max_length=20, primary_key=True)
+    last = models.PositiveIntegerField(default=0)

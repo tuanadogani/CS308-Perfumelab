@@ -67,15 +67,28 @@ def render_invoice_pdf(invoice):
     return buf.getvalue()
 
 
-def seal_and_email(invoice):
-    """Store the PDF's hash and email the PDF copy to the customer (req 4)."""
+def invoice_email_body(invoice):
+    order = invoice.order
+    lines = [f"Hello {order.user.name or order.user.email},", "",
+             f"Thank you for your order #{order.pk}. Your invoice {invoice.number} is attached as a PDF.", ""]
+    for item in order.items.select_related("product__brand"):
+        lines.append(f"  {item.quantity} x {item.product.brand.name} {item.product.name} - {item.line_total:.2f} TL")
+    lines += ["", f"Total: {invoice.total:.2f} TL", f"Delivery address: {order.shipping_address}", "", "PerfumeLab"]
+    return "\n".join(lines)
+
+
+def seal_and_email(invoice, to=None):
+    """Store the PDF's hash and email the PDF copy to the customer (req 4).
+
+    `to` overrides the recipient (used by the send_invoice_email command for testing).
+    """
     pdf = render_invoice_pdf(invoice)
     invoice.pdf_sha256 = hashlib.sha256(pdf).hexdigest()
     invoice.save(update_fields=["pdf_sha256"])
     message = EmailMessage(
         subject=f"Your PerfumeLab invoice {invoice.number}",
-        body="Thank you for your order. Your invoice is attached.",
-        to=[invoice.order.user.email],
+        body=invoice_email_body(invoice),
+        to=[to or invoice.order.user.email],
     )
     message.attach(f"{invoice.number}.pdf", pdf, "application/pdf")
     message.send()

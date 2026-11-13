@@ -52,6 +52,9 @@ class Payment(models.Model):
     transaction_id = models.CharField(max_length=40, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        constraints = [models.CheckConstraint(condition=models.Q(amount__gte=0), name="payment_amount_gte_0")]
+
 
 class PaymentRefund(models.Model):
     """Bank confirmation tied to the original payment and one returned order line."""
