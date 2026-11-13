@@ -1,7 +1,7 @@
 import { Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import ProtectedRoute from './routes/ProtectedRoute';
-import { STAFF_ROLES } from './constants/roles';
+import { STAFF_ROLES, ROLES } from './constants/roles';
 
 import HomePage from './pages/HomePage';
 import StartPage from './pages/StartPage';
@@ -13,6 +13,11 @@ import CartPage from './pages/CartPage';
 import WishlistPage from './pages/WishlistPage';
 import ProfilePage from './pages/ProfilePage';
 import AdminDashboard from './pages/admin/AdminDashboard';
+import ProductsManagement from './pages/admin/ProductsManagement';
+import CategoriesManagement from './pages/admin/CategoriesManagement';
+import StockManagement from './pages/admin/StockManagement';
+import DeliveryList from './pages/admin/DeliveryList';
+import CommentApproval from './pages/admin/CommentApproval';
 import { NotFoundPage, UnauthorizedPage } from './pages/StatusPages';
 
 export default function App() {
@@ -37,6 +42,15 @@ export default function App() {
         {/* Staff roles only */}
         <Route element={<ProtectedRoute roles={STAFF_ROLES} />}>
           <Route path="/admin" element={<AdminDashboard />} />
+        </Route>
+
+        {/* Product Manager only */}
+        <Route element={<ProtectedRoute roles={[ROLES.PRODUCT_MANAGER]} />}>
+          <Route path="/admin/products" element={<ProductsManagement />} />
+          <Route path="/admin/categories" element={<CategoriesManagement />} />
+          <Route path="/admin/stock" element={<StockManagement />} />
+          <Route path="/admin/deliveries" element={<DeliveryList />} />
+          <Route path="/admin/comments" element={<CommentApproval />} />
         </Route>
 
         <Route path="/unauthorized" element={<UnauthorizedPage />} />
