@@ -145,3 +145,54 @@ class MockBankRefundTests(TestCase):
             with self.subTest(transaction_id=transaction_id, amount=amount, key=key):
                 with self.assertRaises(RefundDeclined):
                     refund(transaction_id, Decimal(amount), idempotency_key=key)
+
+
+class InvoiceEmailTests(TestCase):
+    NUMBER = "4242 4242 4242 4242"
+
+    def setUp(self):
+        from catalog.factories import make_product, make_user
+        from cart.models import Cart
+        from cart.services import add_to_cart
+        from payments.models import CreditCard
+        from payments.services import checkout
+        self.user = make_user()
+        self.product = make_product(price="1000.00", stock=5)
+        cart = Cart.objects.create(user=self.user)
+        add_to_cart(cart, self.product, 2)
+        card = CreditCard.from_number(self.user, self.NUMBER, "Card Holder", 12, 2030, brand="Visa")
+        with self.captureOnCommitCallbacks(execute=True):
+            self.order = checkout(self.user, cart, card, self.NUMBER, shipping_address="Tuzla, Istanbul")
+
+    def test_body_lists_items_total_and_address(self):
+        from django.core import mail
+        body = mail.outbox[0].body
+        self.assertIn(self.order.invoice.number, body)
+        self.assertIn(f"2 x {self.product.brand.name} {self.product.name}", body)
+        self.assertIn("Total: 2000.00 TL", body)
+        self.assertIn("Tuzla, Istanbul", body)
+
+    def test_command_resends_to_customer(self):
+        from django.core import mail
+        from django.core.management import call_command
+        call_command("send_invoice_email", self.order.pk, stdout=__import__("io").StringIO())
+        self.assertEqual(len(mail.outbox), 2)
+        self.assertEqual(mail.outbox[1].to, [self.user.email])
+        self.assertTrue(mail.outbox[1].attachments[0][1].startswith(b"%PDF"))
+
+    def test_command_to_override(self):
+        from django.core import mail
+        from django.core.management import call_command
+        call_command("send_invoice_email", self.order.pk, to="tester@example.com", stdout=__import__("io").StringIO())
+        self.assertEqual(mail.outbox[1].to, ["tester@example.com"])
+
+    def test_command_unknown_order(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        with self.assertRaises(CommandError):
+            call_command("send_invoice_email", 999999)
+
+    def test_default_from_address_is_set(self):
+        from django.core import mail
+        self.assertTrue(mail.outbox[0].from_email)
+

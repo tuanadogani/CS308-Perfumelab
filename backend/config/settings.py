@@ -81,6 +81,21 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGINS = [origin.strip() for origin in os.environ.get(
     "CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173"
 ).split(",") if origin.strip()]
+# The guest cart id travels in this header (see cart/views.py); browsers need it allowed.
+from corsheaders.defaults import default_headers  # noqa: E402
+CORS_ALLOW_HEADERS = (*default_headers, "x-cart-key")
 
 # Key for encrypted fields such as User.tax_id (blank = derived from DJANGO_SECRET_KEY).
 FIELD_ENCRYPTION_KEY = os.environ.get("FIELD_ENCRYPTION_KEY", "")
+
+# Email (invoice PDFs, refund notices). Default prints emails in the runserver console.
+# For real delivery set EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend plus the
+# EMAIL_HOST* values (Gmail: smtp.gmail.com, port 587, TLS, a Google "app password").
+EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "true").lower() == "true"
+EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "10"))
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "PerfumeLab <no-reply@perfumelab.local>")
