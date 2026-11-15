@@ -12,6 +12,7 @@ export default function Navbar() {
 
   return (
     <header className="navbar">
+      <p className="announce">Authentic fragrances from authorized distributors · Every bottle with warranty</p>
       <div className="container navbar__inner">
         <Link to="/" className="logo">Maison <em>Lumière</em></Link>
         <nav className="navbar__links">

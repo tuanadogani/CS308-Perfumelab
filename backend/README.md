@@ -44,7 +44,7 @@ Base URL: `http://127.0.0.1:8000`
 - `GET /api/health/` — check the database connection.
 - `POST /api/auth/register/` — register with `{name, email, password, taxId, homeAddress}`; returns `{user, access, refresh}`.
 - `POST /api/auth/logout/` — blacklist `{refresh}`; requires an access token.
-- `GET /api/products/` — public catalog; supports `q, category, brand, family, sort`.
+- `GET /api/products/` — public catalog; supports `q, category, brand, family, sort`. Repeat `family` to require several scent families (AND).
 - `GET /api/products/<id>/` — public product detail.
 - `GET /api/categories/` — public categories.
 - `POST /api/auth/login/` — log in and get access and refresh tokens.
@@ -91,10 +91,11 @@ For local integration, verify `/api/health/`, product browsing, registration, lo
 
 ## Remaining integration work
 
-Customer cart/checkout, payments, refunds and review submission still need HTTP API
-and frontend integration. The frontend cart uses localStorage, checkout shows a placeholder,
-and admin screens are skeletons. Product manager backend APIs are available (see below).
-Payments currently use a mock bank.
+Customer cart/checkout, payments and review submission still need HTTP API
+and frontend integration. Customer order history, cancellation and refund request APIs
+are available along with sales-manager return review APIs (see below); their frontend
+integration is pending. The frontend cart uses localStorage and checkout shows a placeholder.
+Product manager backend APIs are available (see below). Payments currently use a mock bank.
 
 ## Wishlist
 
@@ -131,3 +132,120 @@ New products start at price/base price 0; pricing and discounts belong to the sa
 Existing prices are preserved during product manager updates. No database migration is needed.
 
 Run regression tests with `python manage.py test catalog orders reviews`.
+
+## Customer orders and refund requests
+
+These routes require a customer account Bearer token. Other roles receive 403;
+orders and items belonging to another customer receive 404.
+
+- `GET /api/orders/` — current customer's orders, newest first, with purchased items and their refund status.
+- `GET /api/orders/<id>/` — one owned order, its delivery status and purchase-time prices.
+- `POST /api/orders/<id>/cancel/` — cancel only a `processing` order and restore its stock once.
+- `POST /api/orders/<id>/items/<item_id>/refund/` — request a return for one purchased order line; optional JSON `{ "reason": "Not my scent" }` (maximum 2000 characters).
+
+Refund requests require a `delivered` order and must be made within 30 days of
+`createdAt` (purchase time, not delivery time). Exactly 30 days is accepted.
+Each order line can have one request; all units on that line are returned together.
+The amount is calculated from the stored `unit_price × quantity`, including any
+purchase-time discount. Client-supplied amounts/statuses cannot override it.
+Creating a request does not refund money, restock products or cancel the order.
+Invalid lifecycle actions and duplicate requests return 400.
+
+Order responses use camelCase keys (`shippingAddress`, `createdAt`, `deliveredAt`,
+`productId`, `productName`, `unitPrice`, `lineTotal`). Monetary values in these
+customer routes are decimal strings. Each item has `refund: null` or a refund
+object containing `id`, `orderItemId`, `reason`, `status`, `amount`, `requestedAt`,
+`receivedAt`, `decidedAt` and `paymentRefund`. Internal product cost is excluded.
+
+These APIs operate on existing orders. Customer cart/checkout HTTP integration is
+still pending. Refund processing uses the mock bank described below.
+
+Run `python manage.py test orders refunds payments --keepdb` for regression coverage.
+
+## Sales manager return review
+
+Apply the receipt migration with `python manage.py migrate` before using these APIs.
+All routes require a `sales_manager` Bearer token (401 when unauthenticated, 403 for
+other roles, 404 for an unknown refund ID).
+
+- `GET /api/sales/refunds/` — all requests, newest first; optional `?status=requested`, `approved` or `rejected`. Invalid status filters return 400.
+- `GET /api/sales/refunds/<id>/` — one request, customer/order/product details, purchased quantity and price, receipt and decision records.
+- `POST /api/sales/refunds/<id>/receive/` — record that the physical return arrived at the store. No body is required. Repeating receipt while the request is pending preserves the original receiver and timestamp.
+- `POST /api/sales/refunds/<id>/decision/` — JSON `{ "approve": true }` or `{ "approve": false }`. Approval requires a receipt record and a currently delivered order. Rejection does not require receipt.
+
+Responses include the customer refund fields plus `orderId`, `customerId`,
+`customerName`, `customerEmail`, `productId`, `productName`, `quantity`, `unitPrice`,
+`receivedBy` and `decidedBy`. Monetary values are decimal strings. Receipt and
+decision timestamps and manager IDs are assigned by the server.
+
+Receipt does not change stock, payment or order status. Approval restores only the
+selected line's quantity; the order becomes `refunded` once all its lines are
+approved. Rejected requests keep stock and order status unchanged. Decided requests
+cannot be received or decided again (400). The 30-day eligibility window applies
+when the customer requests the return, so a timely request can be decided later.
+
+## Refund payments (mock bank)
+
+Apply `payments/0003_payment_refund` with `python manage.py migrate`.
+Approval now requires a `Payment` for the order (created by `payments.services.checkout`).
+Orders created directly with `place_order` have no payment and cannot be approved
+for a refund (400); they can still be rejected. No payment records are invented
+for legacy orders or earlier approvals.
+
+The bank refund references the original payment transaction, so the saved card
+may be deleted without preventing a refund. No card number is needed. The amount
+comes from the request's frozen purchase-time price, and cumulative refunds cannot
+exceed the original payment. A zero-price purchase produces a zero-amount confirmation.
+Each request has one protected `PaymentRefund` with its original payment, amount,
+unique bank reference and timestamp. Repeated decisions are rejected before a
+second bank call; concurrent approvals are serialized.
+
+The existing decision endpoint returns 502 when the mock bank raises `RefundDeclined`.
+The request stays pending with no stock, order status or refund-record change, and
+the manager can retry. A stable key based on the refund request ID is used on each
+bank attempt. The mock deterministically returns the same confirmation on retry,
+including after a local database rollback. This simulates an idempotent provider;
+it does not transfer money or maintain a real banking ledger. A real provider must
+implement durable idempotency and reconciliation across bank/database failures.
+
+Customer and manager refund responses include `paymentRefund: null` before payment
+or an object such as:
+
+```json
+{
+  "amount": "700.00",
+  "transactionId": "RFND-EXAMPLE",
+  "refundedAt": "2026-11-12T22:00:00+03:00"
+}
+```
+
+## Refund approval notifications
+
+Every successful approval creates one unread notification for the customer in the
+existing `wishlist.Notification` table, in the same transaction as the refund and
+stock change. The message includes the order, product and refunded amount based on
+the purchase-time discount. No new migration is needed for these notifications.
+The existing endpoints expose the alert:
+
+- `GET /api/notifications/` — only the signed-in user's notifications.
+- `POST /api/notifications/<id>/read/` — mark an owned alert as read (404 for another user's alert).
+- `POST /api/notifications/read-all/` — mark all of the user's alerts as read.
+
+Approval email is sent only after the outer database transaction commits. It includes
+the order and refund request IDs, full product name, quantity, refunded amount and
+bank refund reference. Receipt alone, rejection, failed payment and rolled-back
+approval do not send approval notifications. Repeated or concurrent decisions cannot
+create another alert or schedule another approval email.
+
+Email exceptions and zero-message delivery are logged by `refunds.notifications`.
+They do not undo the completed refund or its in-app alert. Delivery is best effort:
+there is no background queue or automatic retry, and a process exit before the
+post-commit callback can prevent the email. The in-app alert remains persisted.
+
+Email settings can be supplied through `.env`; see `.env.example`. For local inspection,
+set `EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend` to print email in
+the backend terminal (this does not deliver it to an inbox). For SMTP, select
+`django.core.mail.backends.smtp.EmailBackend` and set `EMAIL_HOST`, `EMAIL_PORT`,
+`EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL` and either
+`EMAIL_USE_TLS=true` or `EMAIL_USE_SSL=true` as required by the provider. The default
+backend remains SMTP; no SMTP service or credentials are provisioned by the app.

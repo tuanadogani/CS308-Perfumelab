@@ -5,6 +5,7 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
+from catalog.images import link_images
 from catalog.models import Brand, Category, NoteFamily, Product, ProductNote
 from catalog.seed_data import CATEGORIES, FAMILIES, PERFUMES
 
@@ -51,4 +52,5 @@ class Command(BaseCommand):
                 ProductNote(product=product, tier=tier, name=n)
                 for tier, notes in (("top", top), ("heart", heart), ("base", base)) for n in notes
             )
-        self.stdout.write(self.style.SUCCESS(f"Seeded {len(PERFUMES)} products."))
+        linked = link_images(Product.objects.all())  # photos from catalog/product_images/
+        self.stdout.write(self.style.SUCCESS(f"Seeded {len(PERFUMES)} products, linked {linked} photo(s)."))

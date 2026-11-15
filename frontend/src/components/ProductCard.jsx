@@ -3,7 +3,7 @@ import WishlistButton from './WishlistButton';
 import PerfumeBottle from './PerfumeBottle';
 import StockBadge from './StockBadge';
 import { useCart } from '../context/CartContext';
-import { formatPrice } from '../utils/format';
+import PriceTag, { SaleBadge } from './PriceTag';
 
 export default function ProductCard({ product }) {
   const { addItem } = useCart();
@@ -15,6 +15,7 @@ export default function ProductCard({ product }) {
         <Link to={`/shop/${product.id}`} aria-label={product.name}>
           <PerfumeBottle color={product.color} variant={product.id} size={190} alt={product.name} imageUrl={product.imageUrl} />
         </Link>
+        <SaleBadge product={product} />
         <WishlistButton product={product} />
       </div>
       <div className="product-card__body">
@@ -22,7 +23,7 @@ export default function ProductCard({ product }) {
         <h3><Link to={`/shop/${product.id}`}>{product.name}</Link></h3>
         <p className="muted small">{product.notes.heart.join(' · ')} — {product.volumeMl} ml</p>
         <div className="product-card__row">
-          <span className="price">{formatPrice(product.price)}</span>
+          <PriceTag product={product} />
           <StockBadge stock={product.stock} />
         </div>
         <button

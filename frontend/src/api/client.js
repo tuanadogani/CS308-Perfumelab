@@ -59,3 +59,27 @@ export async function request(path, { method = 'GET', body, headers = {}, retry 
 
 // Simulates network latency for the mocks
 export const delay = (ms = 300) => new Promise((r) => setTimeout(r, ms));
+
+// Binary downloads (e.g. invoice PDFs). Same auth + refresh flow as `request`,
+// but returns a Blob so the browser can open or save it.
+export async function requestBlob(path, { retry = true } = {}) {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    credentials: 'omit',
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  });
+  if (res.status === 401 && retry && accessToken) {
+    try {
+      if (!refreshing) refreshing = refreshSession().finally(() => { refreshing = null; });
+      await refreshing;
+    } catch {
+      clearSession();
+      throw new ApiError('Your session expired. Please log in again.', 401);
+    }
+    return requestBlob(path, { retry: false });
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new ApiError(data?.message || data?.detail || 'Could not download the file', res.status);
+  }
+  return res.blob();
+}

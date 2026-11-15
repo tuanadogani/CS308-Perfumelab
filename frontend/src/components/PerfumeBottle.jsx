@@ -1,6 +1,6 @@
 // Elegant SVG bottle used until real product photos are available.
 // To use a real photo: if product.imageUrl is set, an <img> is rendered instead.
-export default function PerfumeBottle({ color = '#b5651d', size = 220, variant = 0, imageUrl, alt = '' }) {
+export default function PerfumeBottle({ color = '#b5651d', collar = '#c9a96e', size = 220, variant = 0, imageUrl, alt = '' }) {
   if (imageUrl) return <img src={imageUrl} alt={alt} style={{ height: size, objectFit: 'contain' }} />;
   const id = `g-${color.replace('#', '')}-${variant}`;
   const shapes = [
@@ -21,7 +21,7 @@ export default function PerfumeBottle({ color = '#b5651d', size = 220, variant =
         </linearGradient>
       </defs>
       <rect x="82" y="22" width="36" height="38" rx="4" fill="#1d1a17" />
-      <rect x="90" y="58" width="20" height="16" fill="#c9a96e" />
+      <rect x="90" y="58" width="20" height="16" fill={collar} />
       {shapes[variant % 3]}
       <rect x="50" y="95" width="14" height="110" rx="7" fill="#fff" opacity="0.22" />
       <rect x="70" y="140" width="60" height="26" rx="2" fill="#f7f3ec" opacity="0.85" />

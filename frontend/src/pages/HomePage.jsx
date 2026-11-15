@@ -4,18 +4,23 @@ import PerfumeBottle from '../components/PerfumeBottle';
 import ProductCard from '../components/ProductCard';
 import { getProducts } from '../api/productApi';
 import { useAuth } from '../context/AuthContext';
+import { isDiscounted, formatRate } from '../components/PriceTag';
 
 export default function HomePage() {
   const { isAuthenticated } = useAuth();
   const [featured, setFeatured] = useState([]);
+  const [maxDiscount, setMaxDiscount] = useState(0);
 
   useEffect(() => {
-    getProducts({ sort: 'popularity' }).then((list) => setFeatured(list.slice(0, 4)));
+    getProducts({ sort: 'popularity' }).then((list) => {
+      setFeatured(list.slice(0, 4));
+      setMaxDiscount(Math.max(0, ...list.filter(isDiscounted).map((p) => Number(p.discountRate))));
+    });
   }, []);
 
   return (
     <>
-      {/* HERO */}
+      {/* HERO: the two most popular perfumes (drawn bottles until the list has loaded) */}
       <section className="hero">
         <div className="container hero__inner">
           <div className="hero__text">
@@ -32,8 +37,8 @@ export default function HomePage() {
           </div>
           <div className="hero__visual" aria-hidden="true">
             <div className="hero__halo" />
-            <div className="hero__bottle hero__bottle--back"><PerfumeBottle color="#8e2c3f" variant={2} size={260} /></div>
-            <div className="hero__bottle hero__bottle--front"><PerfumeBottle color="#b5651d" variant={0} size={330} /></div>
+            <div className="hero__bottle hero__bottle--back"><PerfumeBottle color="#8b97a5" collar="#c9ced4" variant={2} size={260} imageUrl={featured[1]?.imageUrl} /></div>
+            <div className="hero__bottle hero__bottle--front"><PerfumeBottle color="#2b3138" collar="#c9ced4" variant={0} size={330} imageUrl={featured[0]?.imageUrl} /></div>
           </div>
         </div>
       </section>
@@ -51,6 +56,19 @@ export default function HomePage() {
           </div>
         ))}
       </section>
+
+      {/* SALE BANNER: only while at least one product is discounted */}
+      {maxDiscount > 0 && (
+        <section className="container sale-banner-wrap">
+          <Link to="/shop?sale=1" className="sale-banner">
+            <span className="sale-banner__text">
+              <span className="eyebrow">Limited-time offer</span>
+              <strong>Up to {formatRate(maxDiscount)} off selected fragrances</strong>
+            </span>
+            <span className="link-arrow">Shop the sale →</span>
+          </Link>
+        </section>
+      )}
 
       {/* FEATURED */}
       <section className="container section">

@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ProductCard from '../components/ProductCard';
-import { getProducts, getCategories, getBrands } from '../api/productApi';
-import { products as allMock, NOTE_FAMILIES } from '../mocks/products';
+import { isDiscounted } from '../components/PriceTag';
+import { getProducts, getCategories, getFilters } from '../api/productApi';
 
 // Requirements 1 & 7: categories, search (name/description), sort by price/popularity, brand & note filters
 export default function ShopPage() {
   const [params, setParams] = useSearchParams(); // filters live in the URL → shareable links, back button works
-  const [products, setProducts] = useState([]);
+  const [allProducts, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [options, setOptions] = useState({ brands: [], families: [] });
+  const [brandPool, setBrandPool] = useState([]); // products matching every filter except brand
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState(params.get('q') ?? '');
@@ -17,9 +19,16 @@ export default function ShopPage() {
     q: params.get('q') ?? '',
     category: params.get('category') ?? '',
     brand: params.get('brand') ?? '',
-    family: params.get('family') ?? '',
+    family: params.getAll('family'),
     sort: params.get('sort') ?? 'popularity',
+    sale: params.get('sale') === '1',
   }), [params]);
+
+  // "On sale" is filtered here, the backend does not know this filter.
+  const products = useMemo(
+    () => (filters.sale ? allProducts.filter(isDiscounted) : allProducts),
+    [allProducts, filters.sale],
+  );
 
   const setFilter = (key, value) => {
     const next = new URLSearchParams(params);
@@ -27,17 +36,43 @@ export default function ShopPage() {
     setParams(next, { replace: true });
   };
 
+  // Toggle one scent family; products must match every selected family
+  const toggleFamily = (family) => {
+    const next = new URLSearchParams(params);
+    const selected = filters.family.includes(family)
+      ? filters.family.filter((f) => f !== family)
+      : [...filters.family, family];
+    next.delete('family');
+    selected.forEach((f) => next.append('family', f));
+    setParams(next, { replace: true });
+  };
+
   useEffect(() => { getCategories().then(setCategories); }, []);
+  useEffect(() => { getFilters().then(setOptions).catch(() => {}); }, []); // sidebar still works without them
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true); setError('');
-    getProducts(filters)
+    const { sale, ...query } = filters;
+    getProducts(query)
       .then((list) => { if (!cancelled) setProducts(list); })
       .catch((e) => { if (!cancelled) setError(e.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [filters]);
+
+  // While a brand is selected, the product list only holds that brand. To still offer the
+  // other brands that match the remaining filters, load the list without the brand filter.
+  const familyKey = filters.family.join('|');
+  useEffect(() => {
+    if (!filters.brand) return undefined;
+    let cancelled = false;
+    getProducts({ q: filters.q, category: filters.category, family: filters.family })
+      .then((list) => { if (!cancelled) setBrandPool(list); })
+      .catch(() => { if (!cancelled) setBrandPool([]); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.brand, filters.q, filters.category, familyKey]);
 
   // Search box: 300 ms debounce so we don't send a request on every keystroke
   useEffect(() => {
@@ -46,8 +81,20 @@ export default function ShopPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
-  const brands = getBrands(allMock); // Sprint 2: GET /brands
-  const hasFilters = filters.q || filters.category || filters.brand || filters.family;
+  // Only offer options that still return results. Selected options always stay visible
+  // so they can be cleared.
+  const brands = useMemo(() => {
+    const present = new Set((filters.brand ? brandPool : products).map((p) => p.brand));
+    return options.brands.map((b) => b.name).filter((b) => present.has(b) || b === filters.brand);
+  }, [options.brands, products, brandPool, filters.brand]);
+  // Selected families are combined with AND, so a family is available when at least
+  // one listed product has it.
+  const families = useMemo(() => {
+    const present = new Set(products.flatMap((p) => p.families ?? []));
+    return options.families.map((f) => f.name)
+      .filter((f) => present.has(f) || filters.family.includes(f));
+  }, [options.families, products, filters.family]);
+  const hasFilters = filters.q || filters.category || filters.brand || filters.family.length > 0 || filters.sale;
 
   return (
     <div className="container shop">
@@ -64,6 +111,10 @@ export default function ShopPage() {
 
       <div className="shop__layout">
         <aside className="filters">
+          <h4>Offers</h4>
+          <button className={`chip ${filters.sale ? 'active' : ''}`} aria-pressed={filters.sale}
+            onClick={() => setFilter('sale', filters.sale ? '' : '1')}>On sale</button>
+
           <h4>Category</h4>
           <button className={`chip ${!filters.category ? 'active' : ''}`} onClick={() => setFilter('category', '')}>All</button>
           {categories.map((c) => (
@@ -79,9 +130,9 @@ export default function ShopPage() {
 
           <h4>Scent Family</h4>
           <div className="chips">
-            {NOTE_FAMILIES.map((f) => (
-              <button key={f} className={`chip ${filters.family === f ? 'active' : ''}`}
-                onClick={() => setFilter('family', filters.family === f ? '' : f)}>{f}</button>
+            {families.map((f) => (
+              <button key={f} className={`chip ${filters.family.includes(f) ? 'active' : ''}`}
+                aria-pressed={filters.family.includes(f)} onClick={() => toggleFamily(f)}>{f}</button>
             ))}
           </div>
 

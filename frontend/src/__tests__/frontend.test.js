@@ -57,6 +57,16 @@ describe('filterAndSort', () => {
     const prices = filterAndSort(products, { sort: 'price_asc' }).map((x) => x.price);
     expect(prices).toEqual([...prices].sort((a, b) => a - b));
   });
+  it('filters by a single scent family', () => {
+    expect(filterAndSort(products, { family: ['Woody'] }).every((x) => x.families.includes('Woody'))).toBe(true);
+  });
+  it('requires every selected scent family', () => {
+    const ids = filterAndSort(products, { family: ['Woody', 'Spicy'] }).map((x) => x.id);
+    expect(ids).toEqual(expect.arrayContaining([3]));
+    expect(filterAndSort(products, { family: ['Woody', 'Spicy'] })
+      .every((x) => x.families.includes('Woody') && x.families.includes('Spicy'))).toBe(true);
+    expect(ids.length).toBeLessThan(filterAndSort(products, { family: ['Woody'] }).length);
+  });
   it('filters by category', () => {
     expect(filterAndSort(products, { category: 'extrait' }).every((x) => x.category === 'extrait')).toBe(true);
   });

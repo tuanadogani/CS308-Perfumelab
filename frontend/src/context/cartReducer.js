@@ -12,11 +12,12 @@ export function cartReducer(state, action) {
       const newQty = Math.min(currentQty + quantity, product.stock); // never more than the stock
       if (existing) {
         return { ...state, items: state.items.map((i) =>
-          i.productId === product.id ? { ...i, quantity: newQty, stock: product.stock } : i) };
+          i.productId === product.id ? { ...i, quantity: newQty, stock: product.stock, imageUrl: product.imageUrl ?? i.imageUrl } : i) };
       }
       return { ...state, items: [...state.items, {
         productId: product.id, name: product.name, brand: product.brand, price: product.price,
         volumeMl: product.volumeMl, color: product.color, stock: product.stock, quantity: newQty,
+        imageUrl: product.imageUrl, // product photo for the cart row (null -> drawn bottle)
       }] };
     }
     case 'SET_QTY': {

@@ -1,6 +1,9 @@
 from django.contrib.auth.models import AbstractUser, BaseUserManager
+from django.core.validators import MaxLengthValidator
 from django.db import models
 from django.db.models.functions import Lower
+
+from .fields import EncryptedTextField
 
 
 class UserManager(BaseUserManager):
@@ -42,7 +45,8 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
     name = models.CharField(max_length=150, blank=True)
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.CUSTOMER)
-    tax_id = models.CharField(max_length=20, blank=True)
+    # Stored encrypted (accounts/fields.py); still reads as normal text in Python.
+    tax_id = EncryptedTextField(blank=True, validators=[MaxLengthValidator(20)])
     home_address = models.TextField(blank=True)
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []

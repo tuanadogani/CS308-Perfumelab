@@ -4,10 +4,10 @@ import { ROLES } from '../constants/roles';
 // Real backend uses JWT access/refresh tokens; profile is fetched from /auth/me/.
 // Demo users — mock mode only. One per role for testing.
 const demoUsers = [
-  { id: 1, name: 'Alice Customer', email: 'customer@demo.com', role: ROLES.CUSTOMER, taxId: '11111111111', homeAddress: 'Kadıköy, Istanbul' },
-  { id: 2, name: 'Sarah Sales', email: 'sales@demo.com', role: ROLES.SALES_MANAGER },
-  { id: 3, name: 'Paul Product', email: 'product@demo.com', role: ROLES.PRODUCT_MANAGER },
-  { id: 4, name: 'Sam Support', email: 'support@demo.com', role: ROLES.SUPPORT_AGENT },
+  { id: 1, name: 'Ross Customer', email: 'customer@demo.com', role: ROLES.CUSTOMER, taxId: '11111111111', homeAddress: 'Kadıköy, Istanbul' },
+  { id: 2, name: 'Monica Sales', email: 'sales@demo.com', role: ROLES.SALES_MANAGER },
+  { id: 3, name: 'Phoebe Product', email: 'product@demo.com', role: ROLES.PRODUCT_MANAGER },
+  { id: 4, name: 'Joey Support', email: 'support@demo.com', role: ROLES.SUPPORT_AGENT },
 ];
 const DEMO_PASSWORD = 'Demo1234';
 
