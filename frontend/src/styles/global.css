@@ -59,6 +59,16 @@ img, svg { max-width: 100%; }
 }
 .lead { font-size: 1.05rem; color: var(--ink-soft); max-width: 46ch; }
 
+/* ===== Cart feedback ===== */
+.cart-notice-region { position: fixed; top: 124px; left: 50%; transform: translateX(-50%); z-index: 1000; width: min(420px, calc(100vw - 32px)); pointer-events: none; }
+.cart-notice { display: flex; align-items: flex-start; gap: 12px; padding: 18px; background: var(--paper); border: 1px solid var(--line-strong, var(--line)); border-radius: var(--radius); box-shadow: 0 8px 32px rgba(0, 0, 0, .16); pointer-events: auto; }
+.cart-notice__icon { display: grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: #fff; font-weight: 700; }
+.cart-notice__body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cart-notice__body p { margin: 0 0 6px; font-size: .9rem; }
+.cart-notice__body a { font-size: .8rem; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.cart-notice__close { display: grid; place-items: center; flex-shrink: 0; width: 32px; height: 32px; border: 0; background: transparent; color: var(--ink); font-size: 1.4rem; cursor: pointer; }
+@media (max-width: 480px) { .cart-notice-region { top: 136px; } }
+
 /* ===== Buttons ===== */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; padding: .85rem 1.6rem; border: 1px solid transparent; border-radius: var(--radius); font: 500 .8rem var(--sans); letter-spacing: .12em; text-transform: uppercase; cursor: pointer; transition: all .2s; }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
