@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useReducer } from 'react';
 import { cartReducer, initialCart, cartCount, cartTotal } from './cartReducer';
 import { Link } from 'react-router-dom';
+import AddedToCartModal from '../components/AddedToCartModal';
 
 const CartContext = createContext(null);
 const STORAGE_KEY = 'ml_cart';
@@ -22,6 +23,8 @@ function cartWithFeedback(state, action) {
         ? `${action.product.name} added to your cart${added > 1 ? ` (${added})` : ''}.`
         : action.product.stock <= 0 ? 'This product is out of stock.' : 'All available stock is already in your cart.',
       success: added > 0,
+      product: action.product,
+      quantity: added,
     },
     noticeSequence: (state.noticeSequence ?? 0) + 1,
   };
@@ -43,7 +46,7 @@ export function CartProvider({ children }) {
   const [state, dispatch] = useReducer(cartWithFeedback, undefined, loadCart);
 
   useEffect(() => {
-    if (!state.notice) return;
+    if (!state.notice || state.notice.success) return;
     const id = state.notice.id;
     const timer = setTimeout(() => dispatch({ type: 'DISMISS_NOTICE', id }), 5000);
     return () => clearTimeout(timer);
@@ -66,8 +69,16 @@ export function CartProvider({ children }) {
   return (
     <CartContext.Provider value={value}>
       {children}
+      {state.notice?.success && (
+        <AddedToCartModal
+          product={state.notice.product}
+          quantity={state.notice.quantity}
+          items={state.items}
+          onClose={() => dispatch({ type: 'DISMISS_NOTICE', id: state.notice.id })}
+        />
+      )}
       <div className="cart-notice-region" role="status" aria-live="polite" aria-atomic="true">
-        {state.notice && (
+        {state.notice && !state.notice.success && (
           <div className="cart-notice" key={state.notice.id}>
             <span className="cart-notice__icon" aria-hidden="true">{state.notice.success ? '✓' : '!'}</span>
             <div className="cart-notice__body">
