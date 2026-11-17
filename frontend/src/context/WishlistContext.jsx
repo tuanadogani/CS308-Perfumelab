@@ -39,6 +39,11 @@ export function WishlistProvider({ children }) {
   const items = state.scope === scope ? state.items : [];
   const loading = state.scope !== scope || state.loading;
   const toggle = async (product) => {
+    // Requirement 11, 14: Wishlist requires login
+    if (!user) {
+      throw new Error('Please log in to add items to your wishlist');
+    }
+
     const key = `${scope}:${product.id}`;
     if (loading || state.error || inFlight.current.has(key)) return;
     inFlight.current.add(key);
