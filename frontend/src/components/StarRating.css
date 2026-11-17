@@ -1,0 +1,31 @@
+.star-rating {
+  display: inline-flex;
+  gap: 0.25rem;
+  line-height: 1;
+}
+
+.star {
+  display: inline-block;
+  transition: color 0.2s ease, transform 0.1s ease;
+}
+
+.star--filled {
+  color: #FFD700; /* Gold color for filled stars */
+}
+
+.star--empty {
+  color: #E0E0E0; /* Light gray for empty stars */
+}
+
+.star-rating--interactive .star {
+  cursor: pointer;
+  user-select: none;
+}
+
+.star-rating--interactive .star:hover {
+  transform: scale(1.1);
+}
+
+.star-rating--readonly .star {
+  cursor: default;
+}

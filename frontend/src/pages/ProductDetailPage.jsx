@@ -4,21 +4,42 @@ import PerfumeBottle from '../components/PerfumeBottle';
 import WishlistButton from '../components/WishlistButton';
 import PriceTag, { SaleBadge } from '../components/PriceTag';
 import StockBadge from '../components/StockBadge';
+import StarRating from '../components/StarRating';
 import { getProduct } from '../api/productApi';
+import { getUserRating, submitRating, getProductComments, submitComment } from '../api/reviewApi';
 import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
 
 export default function ProductDetailPage() {
   const { id } = useParams();
   const { addItem, items } = useCart();
+  const { user } = useAuth();
   const [product, setProduct] = useState(null);
   const [error, setError] = useState('');
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
 
+  // Rating & Comment state
+  const [userRating, setUserRating] = useState(null);
+  const [comments, setComments] = useState([]);
+  const [commentText, setCommentText] = useState('');
+  const [ratingError, setRatingError] = useState('');
+  const [commentError, setCommentError] = useState('');
+  const [ratingSuccess, setRatingSuccess] = useState(false);
+  const [commentSuccess, setCommentSuccess] = useState(false);
+
   useEffect(() => {
     setProduct(null); setError('');
     getProduct(id).then(setProduct).catch((e) => setError(e.message));
-  }, [id]);
+
+    // Fetch comments (public, no auth needed)
+    getProductComments(id).then(setComments).catch(() => setComments([]));
+
+    // Fetch user's rating if logged in
+    if (user) {
+      getUserRating(id).then((data) => setUserRating(data.score)).catch(() => setUserRating(null));
+    }
+  }, [id, user]);
 
   if (error) return <div className="container section"><p className="form-error">{error}</p><Link to="/shop">← Back to collection</Link></div>;
   if (!product) return <div className="container section muted">Loading…</div>;
@@ -31,6 +52,35 @@ export default function ProductDetailPage() {
     addItem(product, qty);
     setAdded(true);
     setTimeout(() => setAdded(false), 1800);
+  };
+
+  const handleRatingSubmit = async (score) => {
+    setRatingError('');
+    setRatingSuccess(false);
+    try {
+      await submitRating(id, score);
+      setUserRating(score);
+      setRatingSuccess(true);
+      setTimeout(() => setRatingSuccess(false), 3000);
+    } catch (err) {
+      setRatingError(err.message || 'Failed to submit rating');
+    }
+  };
+
+  const handleCommentSubmit = async (e) => {
+    e.preventDefault();
+    if (!commentText.trim()) return;
+
+    setCommentError('');
+    setCommentSuccess(false);
+    try {
+      await submitComment(id, commentText);
+      setCommentText('');
+      setCommentSuccess(true);
+      setTimeout(() => setCommentSuccess(false), 5000);
+    } catch (err) {
+      setCommentError(err.message || 'Failed to submit comment');
+    }
   };
 
   return (
@@ -81,6 +131,75 @@ export default function ProductDetailPage() {
               <tr><th>Distributor</th><td>{product.distributor}</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Requirement 5: Rating & Comments Section */}
+      <div className="reviews-section">
+        <h2>Reviews & Ratings</h2>
+
+        {user ? (
+          <div className="review-submit">
+            {/* Rating Submission */}
+            <div className="rating-submit">
+              <h3>Rate this product</h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <StarRating rating={userRating || 0} onRate={handleRatingSubmit} />
+                {userRating && <span className="muted">Your rating: {userRating}/5</span>}
+              </div>
+              {ratingError && <p className="form-error">{ratingError}</p>}
+              {ratingSuccess && <p className="form-success">Rating submitted successfully!</p>}
+            </div>
+
+            {/* Comment Submission */}
+            <div className="comment-submit">
+              <h3>Write a review</h3>
+              <form onSubmit={handleCommentSubmit}>
+                <textarea
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  placeholder="Share your experience with this perfume..."
+                  rows={4}
+                  style={{ width: '100%', padding: '0.75rem', marginBottom: '0.5rem' }}
+                />
+                <button type="submit" className="btn btn-dark" disabled={!commentText.trim()}>
+                  Submit Review
+                </button>
+              </form>
+              {commentError && <p className="form-error">{commentError}</p>}
+              {commentSuccess && (
+                <p className="form-success">
+                  Review submitted! It will appear after approval by our team.
+                </p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p className="muted">
+            <Link to="/login">Log in</Link> to rate and review this product
+          </p>
+        )}
+
+        {/* Display Approved Comments */}
+        <div className="comments-list">
+          <h3>Customer Reviews ({comments.length})</h3>
+          {comments.length === 0 ? (
+            <p className="muted">No reviews yet. Be the first to review this product!</p>
+          ) : (
+            <div className="comments">
+              {comments.map((comment) => (
+                <div key={comment.id} className="comment-card">
+                  <div className="comment-header">
+                    <strong>{comment.customerName}</strong>
+                    <span className="muted">
+                      {new Date(comment.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <p>{comment.text}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
