@@ -5,12 +5,6 @@ import { ROLES, ROLE_LABELS } from '../../constants/roles';
 // Role foundation (Requirement 10): each staff role only sees its own modules.
 // [title, description, link?] — modules without a link are not built yet.
 const MODULES = {
-  [ROLES.PRODUCT_MANAGER]: [
-    ['Products & Categories', 'Add / remove products, manage categories'],
-    ['Stock Management', 'Update stock quantities'],
-    ['Delivery List', 'Pending deliveries and addresses'],
-    ['Comment Approval', 'Approve / reject comments'],
-  ],
   [ROLES.SUPPORT_AGENT]: [
     ['Live Chat Queue', 'View and claim active conversations'],
   ],
@@ -18,8 +12,9 @@ const MODULES = {
 
 export default function AdminDashboard() {
   const { user } = useAuth();
-  // Sales managers land straight on their dashboard: all their tools live there.
+  // Sales and product managers land straight on their dashboards: all their tools live there.
   if (user.role === ROLES.SALES_MANAGER) return <Navigate to="/admin/sales" replace />;
+  if (user.role === ROLES.PRODUCT_MANAGER) return <Navigate to="/admin/products" replace />;
   const modules = MODULES[user.role] ?? [];
   return (
     <div className="container section">

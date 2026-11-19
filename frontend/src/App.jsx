@@ -14,6 +14,7 @@ import WishlistPage from './pages/WishlistPage';
 import ProfilePage from './pages/ProfilePage';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import SalesDashboard from './pages/admin/SalesDashboard';
+import ProductManagerDashboard from './pages/admin/ProductManagerDashboard';
 import { NotFoundPage, UnauthorizedPage } from './pages/StatusPages';
 
 export default function App() {
@@ -43,6 +44,11 @@ export default function App() {
         {/* Sales manager only */}
         <Route element={<ProtectedRoute roles={[ROLES.SALES_MANAGER]} />}>
           <Route path="/admin/sales" element={<SalesDashboard />} />
+        </Route>
+
+        {/* Product manager only */}
+        <Route element={<ProtectedRoute roles={[ROLES.PRODUCT_MANAGER]} />}>
+          <Route path="/admin/products" element={<ProductManagerDashboard />} />
         </Route>
 
         <Route path="/unauthorized" element={<UnauthorizedPage />} />
