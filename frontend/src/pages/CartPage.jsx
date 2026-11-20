@@ -12,7 +12,7 @@ export default function CartPage() {
   const handleCheckout = () => {
     // Requirement 4: login is required to order; the cart is kept (localStorage)
     if (!isAuthenticated) return navigate('/login', { state: { from: '/cart' } });
-    alert('Checkout will be added in Sprint 2.');
+    navigate('/checkout');
   };
 
   if (!items.length) {
