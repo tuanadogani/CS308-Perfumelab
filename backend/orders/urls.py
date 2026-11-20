@@ -6,6 +6,7 @@ from .customer_views import (
     CustomerRefundRequestView,
 )
 
+from .invoice_views import CustomerInvoicePdfView, CustomerInvoiceView
 from .views import (
     SalesInvoiceDetailView,
     SalesInvoiceListView,
@@ -18,6 +19,8 @@ urlpatterns = [
     path("orders/<int:pk>/", CustomerOrderDetailView.as_view(), name="customer-order-detail"),
     path("orders/<int:pk>/cancel/", CustomerOrderCancelView.as_view(), name="customer-order-cancel"),
     path("orders/<int:pk>/items/<int:item_pk>/refund/", CustomerRefundRequestView.as_view(), name="customer-refund-request"),
+    path("orders/<int:pk>/invoice/", CustomerInvoiceView.as_view(), name="customer-invoice"),
+    path("orders/<int:pk>/invoice/pdf/", CustomerInvoicePdfView.as_view(), name="customer-invoice-pdf"),
     path("sales/invoices/", SalesInvoiceListView.as_view(), name="sales-invoice-list"),
     path("sales/invoices/<int:pk>/", SalesInvoiceDetailView.as_view(), name="sales-invoice-detail"),
     path("sales/invoices/<int:pk>/pdf/", SalesInvoicePdfView.as_view(), name="sales-invoice-pdf"),
