@@ -115,6 +115,17 @@ class Product(models.Model):
         )
         self.save(update_fields=["discount_rate", "price"])
 
+    def set_base_price(self, price):
+        """Sales manager sets the list price; an active discount stays applied (req 11)."""
+        price = Decimal(str(price))
+        if price <= 0:
+            raise ValidationError("Price must be greater than zero.")
+        self.base_price = price.quantize(TWO_PLACES, ROUND_HALF_UP)
+        self.price = (self.base_price * (Decimal("100") - self.discount_rate) / Decimal("100")).quantize(
+            TWO_PLACES, ROUND_HALF_UP
+        )
+        self.save(update_fields=["base_price", "price"])
+
     def clear_discount(self):
         self.apply_discount(0)
 
