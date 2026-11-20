@@ -1,0 +1,27 @@
+/* ===== Checkout + invoice (Requirement 4) ===== */
+/* .auth-card.checkout-card: global.css is injected after this file, so match its specificity + 1 */
+.auth-card.checkout-card { max-width: none; padding: 2rem; animation: none; border: 1px solid var(--line); }
+.auth-card.checkout-card h3 { margin: .4rem 0 0; }
+.checkout-card__row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; }
+.checkout-card__row label, .auth-card.checkout-card input { min-width: 0; width: 100%; box-sizing: border-box; }
+
+.invoice__card { background: #fff; border: 1px solid var(--line); padding: 2rem; display: flex; flex-direction: column; gap: 1.6rem; }
+.invoice__head { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; flex-wrap: wrap; }
+.invoice__head h1 { margin: .2rem 0 0; font-size: 1.6rem; }
+.invoice__meta { display: flex; flex-direction: column; align-items: flex-end; gap: .2rem; }
+.invoice__parties { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.2rem; }
+.invoice__parties p { margin: 0; overflow-wrap: anywhere; }
+.invoice__parties .eyebrow { margin-bottom: .3rem; }
+.invoice__table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.invoice__table th, .invoice__table td { text-align: left; padding: .7rem .4rem; border-bottom: 1px solid var(--line); }
+.invoice__table th:not(:first-child), .invoice__table td:not(:first-child) { text-align: right; white-space: nowrap; }
+.invoice__table tfoot td { font-weight: 700; font-size: 1.05rem; border-bottom: 0; border-top: 1px solid var(--line-strong); }
+.invoice__actions { display: flex; gap: .8rem; flex-wrap: wrap; }
+
+@media (max-width: 700px) {
+  .auth-card.checkout-card { padding: 1.4rem; }
+  .invoice__card { padding: 1.2rem; }
+  .invoice__parties { grid-template-columns: 1fr; }
+  .invoice__meta { align-items: flex-start; }
+  .invoice__table thead th:nth-child(3), .invoice__table tbody td:nth-child(3) { display: none; }
+}

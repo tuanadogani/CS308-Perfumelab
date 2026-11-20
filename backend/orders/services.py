@@ -3,6 +3,7 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
+from cart.models import Cart
 from catalog.models import Product
 
 from .models import Delivery, Invoice, InvoiceCounter, Order, OrderItem, OrderStatus
@@ -28,7 +29,12 @@ def place_order(user, cart, card=None, shipping_address=None):
 
     Product rows are locked with SELECT ... FOR UPDATE in id order, so two customers buying
     the last bottle at the same time cannot both succeed and deadlocks are avoided (req 18).
+
+    The cart row is locked first: a double-clicked "Pay" sends two requests for the same cart,
+    and without this both read the lines before either deleted them -> two orders, two charges.
+    The second request now waits, then finds the cart empty.
     """
+    Cart.objects.select_for_update().get(pk=cart.pk)
     lines = list(cart.items.select_related("product"))
     if not lines:
         raise ValidationError("Your cart is empty.")
