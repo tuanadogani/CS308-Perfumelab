@@ -1,3 +1,4 @@
+import re
 import threading
 from unittest.mock import patch
 
@@ -10,7 +11,7 @@ from cart.models import Cart
 from cart.services import add_to_cart
 from catalog.factories import make_product, make_user
 
-from .invoices import FONT, FONT_BOLD, render_invoice_pdf
+from .invoices import FONT, FONT_BOLD, PRODUCT_WIDTH, render_invoice_pdf, wrap_text
 from refunds.models import RefundRequest
 
 from .models import Delivery, Order, OrderItem, OrderStatus
@@ -324,6 +325,10 @@ class SalesAnalyticsApiTests(APITestCase):
         self.assertIn("start_date cannot be after end_date", response.data["message"])
 
 
+def page_count(pdf):
+    return len(re.findall(rb"/Type /Page[^s]", pdf))
+
+
 class InvoicePdfTests(TestCase):
     def setUp(self):
         self.user = make_user(name="Ayşe Yılmaz", home_address="Çırağan Cd. No:5, Beşiktaş, İstanbul")
@@ -342,6 +347,24 @@ class InvoicePdfTests(TestCase):
     def test_invoice_render_is_deterministic(self):
         # the stored SHA-256 only stays valid if every render is byte-identical
         self.assertEqual(render_invoice_pdf(self.order.invoice), render_invoice_pdf(self.order.invoice))
+
+    def test_long_text_is_wrapped_to_fit_the_column(self):
+        text = "Çırağan Caddesi No:5 Daire:12, Yıldız Mahallesi, Beşiktaş, İstanbul, Türkiye " * 3
+        lines = wrap_text(text, FONT, 10, PRODUCT_WIDTH)
+        self.assertGreater(len(lines), 1)
+        for line in lines:
+            self.assertLessEqual(pdfmetrics.stringWidth(line, FONT, 10), PRODUCT_WIDTH)
+        self.assertEqual(" ".join(lines).split(), text.split())  # nothing is cut off
+
+    def test_short_invoice_fits_on_one_page(self):
+        self.assertEqual(page_count(render_invoice_pdf(self.order.invoice)), 1)
+
+    def test_long_order_continues_on_next_page(self):
+        cart, _ = Cart.objects.get_or_create(user=self.user)
+        for _ in range(60):
+            add_to_cart(cart, make_product(stock=5))
+        order = place_order(self.user, cart)
+        self.assertGreater(page_count(render_invoice_pdf(order.invoice)), 1)
 
 
 class CustomerOrderApiTests(APITestCase):
