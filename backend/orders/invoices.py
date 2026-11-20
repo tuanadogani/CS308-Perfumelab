@@ -7,6 +7,7 @@ from pathlib import Path
 from django.core.mail import EmailMessage
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
+from reportlab.lib.utils import simpleSplit
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
@@ -20,6 +21,18 @@ def _register_fonts():
         pdfmetrics.registerFont(TTFont(FONT, str(FONT_DIR / "DejaVuSans.ttf")))
         pdfmetrics.registerFont(TTFont(FONT_BOLD, str(FONT_DIR / "DejaVuSans-Bold.ttf")))
 
+# Page layout. Long text is wrapped and long orders continue on a new page instead of
+# running off the paper.
+LEFT, RIGHT, BOTTOM = 20 * mm, 190 * mm, 20 * mm
+LINE = 6 * mm
+PRODUCT_WIDTH = 88 * mm  # the product column ends just before the Qty column at 110 mm
+
+
+def wrap_text(text, font, size, width):
+    """Split text into lines no wider than `width` (breaks at spaces)."""
+    return simpleSplit(text, font, size, width) or [""]
+
+
 def render_invoice_pdf(invoice):
     _register_fonts()
     order = invoice.order
@@ -27,10 +40,20 @@ def render_invoice_pdf(invoice):
     # invariant=1 keeps the file byte-identical between renders, so the stored hash stays valid
     c = canvas.Canvas(buf, pagesize=A4, invariant=1)
     width, height = A4
-    y = height - 25 * mm
+    top = height - 25 * mm
+    y = top
+
+    def table_header(y):
+        c.setFont(FONT_BOLD, 10)
+        for x, label in ((20, "Product"), (110, "Qty"), (130, "Unit price"), (165, "Total")):
+            c.drawString(x * mm, y, label)
+        y -= 2 * mm
+        c.line(LEFT, y, RIGHT, y)
+        c.setFont(FONT, 10)
+        return y - LINE
 
     c.setFont(FONT_BOLD, 20)
-    c.drawString(20 * mm, y, "PerfumeLab - Invoice")
+    c.drawString(LEFT, y, "PerfumeLab - Invoice")
     y -= 10 * mm
     c.setFont(FONT, 10)
     for line in (
@@ -40,25 +63,29 @@ def render_invoice_pdf(invoice):
         f"Delivery address: {order.shipping_address}",
         f"Payment: card ending {order.card_last4 or '----'}",
     ):
-        c.drawString(20 * mm, y, line)
-        y -= 6 * mm
+        for part in wrap_text(line, FONT, 10, RIGHT - LEFT):
+            c.drawString(LEFT, y, part)
+            y -= LINE
 
-    y -= 6 * mm
-    c.setFont(FONT_BOLD, 10)
-    for x, label in ((20, "Product"), (110, "Qty"), (130, "Unit price"), (165, "Total")):
-        c.drawString(x * mm, y, label)
-    y -= 2 * mm
-    c.line(20 * mm, y, 190 * mm, y)
-    y -= 6 * mm
-    c.setFont(FONT, 10)
+    y -= LINE
+    y = table_header(y)
     for item in order.items.select_related("product__brand"):
-        c.drawString(20 * mm, y, f"{item.product.brand.name} {item.product.name} {item.product.volume_ml}ml"[:55])
+        name = f"{item.product.brand.name} {item.product.name} {item.product.volume_ml}ml"
+        name_lines = wrap_text(name, FONT, 10, PRODUCT_WIDTH)
+        if y - (len(name_lines) - 1) * LINE < BOTTOM:
+            c.showPage()
+            y = table_header(top)
         c.drawString(110 * mm, y, str(item.quantity))
         c.drawString(130 * mm, y, f"{item.unit_price:.2f} TL")
         c.drawString(165 * mm, y, f"{item.line_total:.2f} TL")
-        y -= 6 * mm
+        for part in name_lines:
+            c.drawString(LEFT, y, part)
+            y -= LINE
 
-    c.line(20 * mm, y, 190 * mm, y)
+    if y - 8 * mm < BOTTOM:
+        c.showPage()
+        y = top
+    c.line(LEFT, y, RIGHT, y)
     y -= 8 * mm
     c.setFont(FONT_BOLD, 12)
     c.drawString(130 * mm, y, f"TOTAL: {invoice.total:.2f} TL")
