@@ -1,6 +1,9 @@
+import re
+
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.db import models
+from django.utils import timezone
 
 
 class CreditCard(models.Model):
@@ -28,16 +31,35 @@ class CreditCard(models.Model):
 
     @classmethod
     def from_number(cls, user, number, holder_name, expiry_month, expiry_year, brand=""):
-        digits = "".join(ch for ch in number if ch.isdigit())
-        if not 13 <= len(digits) <= 19:
-            raise ValueError("Card number must have 13-19 digits.")
+        digits = cls.normalize_number(number)
+        if not isinstance(holder_name, str) or not holder_name.strip():
+            raise ValueError("Card holder name is required.")
+        if (type(expiry_month) is not int or type(expiry_year) is not int
+                or not 1 <= expiry_month <= 12 or not 1 <= expiry_year <= 9999):
+            raise ValueError("Invalid card expiry date.")
+        today = timezone.localdate()
+        if (expiry_year, expiry_month) < (today.year, today.month):
+            raise ValueError("The card has expired.")
         return cls.objects.create(
             user=user, number_hash=make_password(digits), last4=digits[-4:], brand=brand,
-            holder_name=holder_name, expiry_month=expiry_month, expiry_year=expiry_year,
+            holder_name=holder_name.strip(), expiry_month=expiry_month, expiry_year=expiry_year,
         )
 
+    @staticmethod
+    def normalize_number(number):
+        if not isinstance(number, str) or not re.fullmatch(r"[0-9 -]+", number):
+            raise ValueError("Card number must contain only digits, spaces or hyphens.")
+        digits = number.replace(" ", "").replace("-", "")
+        if not 13 <= len(digits) <= 19:
+            raise ValueError("Card number must have 13-19 digits.")
+        return digits
+
     def matches(self, number):
-        return check_password("".join(ch for ch in number if ch.isdigit()), self.number_hash)
+        try:
+            digits = self.normalize_number(number)
+        except ValueError:
+            return False
+        return check_password(digits, self.number_hash)
 
     def __str__(self):
         return f"{self.brand or 'Card'} ****{self.last4}"
