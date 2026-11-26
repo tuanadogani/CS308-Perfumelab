@@ -1,4 +1,7 @@
 from decimal import Decimal
+from unittest.mock import patch
+
+from django.core import mail
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
 from django.test import TestCase
@@ -30,8 +33,40 @@ class WishlistDiscountTests(TestCase):
         self.assertFalse(Notification.objects.filter(user=self.other).exists())
 
     def test_removing_discount_sends_no_notification(self):
-        set_discount(self.manager, [self.product], 0)
+        self.product.apply_discount(20)
+        with self.captureOnCommitCallbacks(execute=True):
+            set_discount(self.manager, [self.product], 0)
         self.assertEqual(Notification.objects.count(), 0)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_active_discount_does_not_email_again_until_a_new_discount_starts(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            set_discount(self.manager, [self.product], 20)
+            set_discount(self.manager, [self.product], 20)
+            set_discount(self.manager, [self.product], 30)
+        self.assertEqual(len(mail.outbox), 1)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            set_discount(self.manager, [self.product], 0)
+            set_discount(self.manager, [self.product], 15)
+        self.assertEqual(len(mail.outbox), 2)
+
+    def test_discount_rollback_discards_email(self):
+        with self.captureOnCommitCallbacks(execute=True) as callbacks:
+            with self.assertRaises(RuntimeError), transaction.atomic():
+                set_discount(self.manager, [self.product], 20)
+                raise RuntimeError("Roll back discount")
+        self.assertEqual(callbacks, [])
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_email_failure_does_not_prevent_other_customers_from_being_notified(self):
+        WishlistItem.objects.create(user=self.other, product=self.product)
+        with patch("wishlist.services.send_mail", side_effect=[RuntimeError("SMTP unavailable"), 1]) as send:
+            with self.assertLogs("wishlist.services", level="ERROR"):
+                with self.captureOnCommitCallbacks(execute=True):
+                    set_discount(self.manager, [self.product], 20)
+        self.assertEqual(send.call_count, 2)
+        self.assertEqual(Notification.objects.count(), 2)
 
     def test_only_sales_manager_can_discount(self):
         with self.assertRaises(PermissionDenied):
@@ -108,14 +143,21 @@ class SalesDiscountApiTests(APITestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_sales_manager_can_apply_discount_and_notifies_wishlist_users(self):
+        WishlistItem.objects.create(user=self.product_manager, product=self.product)
         self.client.force_authenticate(self.sales_manager)
-        response = self.client.post(self.url, {
-            "product_ids": [self.product.id],
-            "discount_rate": 20,
-        })
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(self.url, {
+                "product_ids": [self.product.id],
+                "discount_rate": 20,
+            })
+            self.assertEqual(len(mail.outbox), 0)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["notificationsSent"], 1)
+        self.assertEqual(response.data["notificationsSent"], 2)
         self.assertEqual(response.data["discountRate"], 20.0)
+        self.assertEqual([email.to for email in mail.outbox], [[self.customer.email]])
+        self.assertIn(self.product.name, mail.outbox[0].body)
+        self.assertIn("20.00%", mail.outbox[0].body)
+        self.assertIn("800.00 TL", mail.outbox[0].body)
 
         # Check DB updates
         self.product.refresh_from_db()
