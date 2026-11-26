@@ -34,13 +34,18 @@ def place_order(user, cart, card=None, shipping_address=None):
     and without this both read the lines before either deleted them -> two orders, two charges.
     The second request now waits, then finds the cart empty.
     """
-    Cart.objects.select_for_update().get(pk=cart.pk)
+    # Serialize checkout of the same cart before reading its contents. Product
+    # locks alone prevent overselling, but not two charges for the same cart.
+    cart = Cart.objects.select_for_update().get(pk=cart.pk)
+    if cart.user_id != user.pk:
+        raise ValidationError("This cart does not belong to you.")
     lines = list(cart.items.select_related("product"))
     if not lines:
         raise ValidationError("Your cart is empty.")
-    address = shipping_address or user.home_address
-    if not address:
+    address = user.home_address if shipping_address is None else shipping_address
+    if not isinstance(address, str) or not address.strip():
         raise ValidationError("A delivery address is required.")
+    address = address.strip()
 
     locked = {
         p.pk: p

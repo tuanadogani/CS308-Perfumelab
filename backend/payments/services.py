@@ -3,6 +3,7 @@ import logging
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
+from django.utils import timezone
 
 from orders.invoices import seal_and_email
 from orders.services import place_order
@@ -20,8 +21,11 @@ def checkout(user, cart, card, card_number, shipping_address=None):
     declines, nothing is kept and the cart stays as it was. The invoice email goes out
     only after the transaction has committed.
     """
-    if card.user_id != user.pk or not card.matches(card_number):
+    if card is None or card.user_id != user.pk or not card.matches(card_number):
         raise bank.PaymentDeclined("Card details do not match the saved card.")
+    today = timezone.localdate()
+    if (card.expiry_year, card.expiry_month) < (today.year, today.month):
+        raise bank.PaymentDeclined("The card has expired.")
     with transaction.atomic():
         order = place_order(user, cart, card=card, shipping_address=shipping_address)
         txn = bank.charge(card_number, order.total)

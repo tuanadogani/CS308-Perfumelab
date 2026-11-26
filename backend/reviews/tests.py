@@ -133,6 +133,31 @@ class CommentApiTests(APITestCase):
         response = self.client.post(self.url, {"text": "   "}, format="json")
         self.assertEqual(response.status_code, 400)
 
+    def test_xss_payload_is_plain_json_text_and_stays_hidden_until_approval(self):
+        from .models import Comment
+        payload = '<script>alert("xss")</script><img src=x onerror=alert(1)>'
+        buy(self.customer, self.product)
+        self.client.force_authenticate(self.customer)
+        response = self.client.post(self.url, {"text": payload}, format="json")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["text"], payload)
+        self.assertEqual(self.client.get(self.url).data, [])
+        review_comment(Comment.objects.get(pk=response.data["id"]), make_user("product_manager"), True)
+        self.client.force_authenticate(user=None)
+        public = self.client.get(self.url)
+        self.assertIn("application/json", public["Content-Type"])
+        self.assertEqual(public.data[0]["text"], payload)
+        # JSON text is escaped at the HTML rendering boundary by React, not stored
+        # HTML-escaped (which would double-escape legitimate customer text).
+
+    def test_oversized_comment_rejected_without_creating_record(self):
+        from .models import Comment
+        buy(self.customer, self.product)
+        self.client.force_authenticate(self.customer)
+        response = self.client.post(self.url, {"text": "x" * 2001}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Comment.objects.exists())
+
     def test_staff_roles_cannot_post_comments(self):
         for role in ("sales_manager", "product_manager", "support_agent"):
             self.client.force_authenticate(make_user(role))
