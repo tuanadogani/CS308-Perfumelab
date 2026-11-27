@@ -12,11 +12,17 @@ def add_to_cart(cart, product, quantity=1):
         raise ValidationError("This product is not on sale yet.")
     if not product.active or product.stock <= 0:
         raise ValidationError("This product is out of stock.")
-    item = CartItem.objects.filter(cart=cart, product=product).first()
-    if item is None:
-        return CartItem.objects.create(cart=cart, product=product, quantity=min(quantity, product.stock))
-    item.quantity = min(item.quantity + quantity, product.stock)
-    item.save(update_fields=["quantity"])
+    with transaction.atomic():
+        # get_or_create survives a double click: if another request creates the line between
+        # our lookup and our insert, it catches the unique-constraint error and fetches that line.
+        item, created = CartItem.objects.get_or_create(
+            cart=cart, product=product, defaults={"quantity": min(quantity, product.stock)}
+        )
+        if not created:
+            # Lock the line so two parallel adds are counted one after the other, not lost.
+            item = CartItem.objects.select_for_update().get(pk=item.pk)
+            item.quantity = min(item.quantity + quantity, product.stock)
+            item.save(update_fields=["quantity"])
     return item
 
 
