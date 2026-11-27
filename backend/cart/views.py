@@ -17,6 +17,16 @@ from .serializers import AddItemSerializer, MergeSerializer, SetQuantitySerializ
 from .services import add_to_cart, cart_lines, clear_cart, get_cart, remove_from_cart, set_quantity
 
 
+def stock_warning(product, requested, added, in_cart):
+    """Tell the customer when the stock limit changed what they asked for (None when it did not)."""
+    if added >= requested:
+        return None
+    if added == 0:
+        return f"You already have all {product.stock} in stock of {product.name} in your cart."
+    return (f"Only {product.stock} of {product.name} in stock: {added} added, "
+            f"{in_cart} in your cart now.")
+
+
 class CartApiView(APIView):
     permission_classes = [IsCustomer]
 
@@ -49,11 +59,14 @@ class CartItemListView(CartApiView):
         serializer.is_valid(raise_exception=True)
         product = get_object_or_404(Product, pk=serializer.validated_data["productId"])
         cart = get_cart(request.user)
+        requested = serializer.validated_data["quantity"]
         try:
-            add_to_cart(cart, product, serializer.validated_data["quantity"])
+            item = add_to_cart(cart, product, requested)
         except ValidationError as exc:
             return self.bad_request(exc)
-        return self.cart_response(cart, status.HTTP_201_CREATED)
+        warning = stock_warning(product, requested, item.added, item.quantity)
+        extra = {"warning": warning} if warning else {}
+        return self.cart_response(cart, status.HTTP_201_CREATED, **extra)
 
 
 class CartItemDetailView(CartApiView):
@@ -64,10 +77,14 @@ class CartItemDetailView(CartApiView):
         serializer.is_valid(raise_exception=True)
         product = get_object_or_404(Product, pk=product_id)
         cart = get_cart(request.user)
+        requested = serializer.validated_data["quantity"]
         try:
-            set_quantity(cart, product, serializer.validated_data["quantity"])
+            item = set_quantity(cart, product, requested)
         except ValidationError as exc:
             return self.bad_request(exc)
+        if item is not None and item.quantity < requested:
+            warning = f"Only {product.stock} of {product.name} in stock: quantity set to {item.quantity}."
+            return self.cart_response(cart, warning=warning)
         return self.cart_response(cart)
 
     def delete(self, request, product_id):
@@ -80,7 +97,8 @@ class CartMergeView(CartApiView):
     """POST /api/cart/merge/ {items: [{productId, quantity}]} after login.
 
     Quantities are added to what the account's cart already holds, capped at stock.
-    Products that are gone or sold out are skipped and listed in `skipped`.
+    Products that are gone or sold out are skipped and listed in `skipped`; products the
+    stock limit cut short are listed in `adjusted` as {productId, requested, added}.
     """
 
     def post(self, request):
@@ -89,14 +107,17 @@ class CartMergeView(CartApiView):
         cart = get_cart(request.user)
         wanted = serializer.validated_data["items"]
         products = Product.objects.in_bulk([line["productId"] for line in wanted])
-        skipped = []
+        skipped, adjusted = [], []
         with transaction.atomic():
             for line in wanted:
                 product = products.get(line["productId"])
                 try:
                     if product is None:
                         raise ValidationError("Unknown product.")
-                    add_to_cart(cart, product, line["quantity"])
+                    item = add_to_cart(cart, product, line["quantity"])
                 except ValidationError:
                     skipped.append(line["productId"])
-        return self.cart_response(cart, skipped=skipped)
+                    continue
+                if item.added < line["quantity"]:
+                    adjusted.append({"productId": product.pk, "requested": line["quantity"], "added": item.added})
+        return self.cart_response(cart, skipped=skipped, adjusted=adjusted)

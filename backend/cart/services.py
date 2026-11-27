@@ -5,7 +5,11 @@ from .models import Cart, CartItem
 
 
 def add_to_cart(cart, product, quantity=1):
-    """Out-of-stock products can be found but never added (req 7); never more than the stock."""
+    """Out-of-stock products can be found but never added (req 7); never more than the stock.
+
+    The returned line has an extra `added` attribute: how many were really added, so the
+    API can tell the customer when the stock limit cut their request short.
+    """
     if quantity < 1:
         raise ValidationError("Quantity must be at least 1.")
     if not product.is_priced:
@@ -18,11 +22,15 @@ def add_to_cart(cart, product, quantity=1):
         item, created = CartItem.objects.get_or_create(
             cart=cart, product=product, defaults={"quantity": min(quantity, product.stock)}
         )
-        if not created:
+        if created:
+            item.added = item.quantity
+        else:
             # Lock the line so two parallel adds are counted one after the other, not lost.
             item = CartItem.objects.select_for_update().get(pk=item.pk)
-            item.quantity = min(item.quantity + quantity, product.stock)
+            before = item.quantity
+            item.quantity = min(before + quantity, product.stock)
             item.save(update_fields=["quantity"])
+            item.added = item.quantity - before
     return item
 
 
