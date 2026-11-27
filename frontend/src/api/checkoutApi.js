@@ -2,11 +2,10 @@ import { request, requestBlob } from './client';
 
 // Checkout (Requirement 4). Backend contract: docs/CHECKOUT_API.md.
 //
-// The cart itself stays in localStorage (CartContext), so guests keep it after login.
-// Right before paying we copy it to the server cart: the server re-checks stock and
-// prices, then POST /checkout/ pays for exactly that cart.
+// Logged-in customers' carts live on the server (CartContext + cartApi.js), and
+// POST /checkout/ pays for exactly that cart.
 
-/** Replace the server cart with the browser cart. Returns the server cart (capped at stock). */
+/** Replace the server cart with a browser cart (used when there is no server cart, e.g. mock mode). */
 export async function syncCart(items) {
   await request('/cart/', { method: 'DELETE' });
   return request('/cart/merge/', {

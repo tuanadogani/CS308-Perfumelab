@@ -31,8 +31,13 @@ export function cartReducer(state, action) {
       return { ...state, items: state.items.filter((i) => i.productId !== action.productId) };
     case 'CLEAR':
       return initialCart;
-    case 'HYDRATE':
-      return Array.isArray(action.items) ? { items: action.items } : state;
+    case 'HYDRATE': {
+      if (!Array.isArray(action.items)) return state;
+      // The server cart has no bottle colour; keep the one we already had for that product.
+      const colors = new Map(state.items.map((i) => [i.productId, i.color]));
+      return { ...state, items: action.items.map((i) =>
+        (i.color == null && colors.get(i.productId) != null ? { ...i, color: colors.get(i.productId) } : i)) };
+    }
     default:
       return state;
   }

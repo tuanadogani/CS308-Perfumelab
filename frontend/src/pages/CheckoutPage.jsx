@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
-import { checkout, syncCart } from '../api/checkoutApi';
+import { checkout } from '../api/checkoutApi';
 import { formatPrice } from '../utils/format';
 import {
   cartDifferences, formatCardNumber, formatExpiry, toCheckoutBody, validateCheckout,
@@ -12,7 +12,7 @@ import '../styles/checkout.css';
 // Requirement 4 + 15: the customer enters card details, the (mock) bank confirms,
 // then the invoice is shown and emailed. Card number and CVV are only sent, never stored here.
 export default function CheckoutPage() {
-  const { items, total, setQuantity, clear } = useCart();
+  const { items, total, refresh, clear } = useCart();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({
@@ -45,11 +45,11 @@ export default function CheckoutPage() {
 
     setPaying(true);
     try {
-      // 1) Copy the browser cart to the server; stop if stock changed meanwhile.
-      const serverCart = await syncCart(items);
+      // 1) Re-read the server cart (it re-checks stock); stop if it changed meanwhile.
+      //    The cart on screen is updated from the server reply.
+      const serverCart = await refresh();
       const changed = cartDifferences(items, serverCart);
       if (changed.length) {
-        changed.forEach((line) => setQuantity(line.productId, line.quantity));
         setMessage(`Stock changed for ${changed.map((l) => l.name).join(', ')}. `
           + 'We updated your cart — please check it and pay again.');
         setPaying(false);
@@ -57,7 +57,7 @@ export default function CheckoutPage() {
       }
       // 2) Pay. On success the order exists, stock is reduced and the invoice is emailed.
       const result = await checkout(toCheckoutBody(form));
-      clear();
+      clear({ local: true }); // the server already emptied the cart when it placed the order
       navigate(`/orders/${result.order.id}/invoice`, { replace: true, state: { justPaid: true } });
     } catch (err) {
       setMessage(err.status === 402

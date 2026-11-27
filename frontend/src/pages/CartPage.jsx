@@ -10,7 +10,7 @@ export default function CartPage() {
   const navigate = useNavigate();
 
   const handleCheckout = () => {
-    // Requirement 4: login is required to order; the cart is kept (localStorage)
+    // Requirement 4: login is required to order; the guest cart is kept and merged into the account cart after login
     if (!isAuthenticated) return navigate('/login', { state: { from: '/cart' } });
     navigate('/checkout');
   };
