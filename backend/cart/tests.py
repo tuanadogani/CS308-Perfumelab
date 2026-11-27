@@ -121,3 +121,28 @@ class CartEditTests(TestCase):
         with self.assertNumQueries(1):
             names = [line.product.brand.name for line in cart_lines(self.cart)]
         self.assertEqual(len(names), 3)
+
+
+class UnpricedProductCartTests(TestCase):
+    def setUp(self):
+        self.cart = Cart.objects.create(user=make_user())
+        self.product = make_product(price="0.00", stock=5)
+
+    def test_unpriced_product_cannot_be_added(self):
+        with self.assertRaises(ValidationError):
+            add_to_cart(self.cart, self.product)
+        self.assertEqual(self.cart.items.count(), 0)
+
+    def test_unpriced_product_quantity_cannot_be_set(self):
+        from .services import set_quantity
+        with self.assertRaises(ValidationError):
+            set_quantity(self.cart, self.product, 2)
+        self.assertEqual(self.cart.items.count(), 0)
+
+    def test_add_to_cart_api_rejects_unpriced_product(self):
+        from rest_framework.test import APIClient
+        client = APIClient()
+        client.force_authenticate(self.cart.user)
+        response = client.post("/api/cart/items/", {"productId": self.product.pk, "quantity": 1}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("not on sale", response.data["message"])

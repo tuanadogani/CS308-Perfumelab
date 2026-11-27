@@ -8,6 +8,8 @@ def add_to_cart(cart, product, quantity=1):
     """Out-of-stock products can be found but never added (req 7); never more than the stock."""
     if quantity < 1:
         raise ValidationError("Quantity must be at least 1.")
+    if not product.is_priced:
+        raise ValidationError("This product is not on sale yet.")
     if not product.active or product.stock <= 0:
         raise ValidationError("This product is out of stock.")
     item = CartItem.objects.filter(cart=cart, product=product).first()
@@ -51,6 +53,8 @@ def set_quantity(cart, product, quantity):
     if quantity == 0:
         remove_from_cart(cart, product)
         return None
+    if not product.is_priced:
+        raise ValidationError("This product is not on sale yet.")
     if not product.active or product.stock <= 0:
         raise ValidationError("This product is out of stock.")
     item, _ = CartItem.objects.update_or_create(

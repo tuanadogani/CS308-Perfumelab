@@ -99,6 +99,11 @@ class Product(models.Model):
         return self.stock > 0
 
     @property
+    def is_priced(self):
+        """New products start at 0 TL until the sales manager sets a price (req 11)."""
+        return self.base_price > 0
+
+    @property
     def effective_cost(self):
         if self.cost is not None:
             return self.cost
