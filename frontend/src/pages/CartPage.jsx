@@ -5,7 +5,7 @@ import PerfumeBottle from '../components/PerfumeBottle';
 import { formatPrice } from '../utils/format';
 
 export default function CartPage() {
-  const { items, total, setQuantity, removeItem, clear } = useCart();
+  const { items, total, loading, setQuantity, removeItem, clear } = useCart();
   const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
@@ -14,6 +14,8 @@ export default function CartPage() {
     if (!isAuthenticated) return navigate('/login', { state: { from: '/cart' } });
     navigate('/checkout');
   };
+
+  if (loading) return <div className="container section muted">Loading…</div>;
 
   if (!items.length) {
     return (

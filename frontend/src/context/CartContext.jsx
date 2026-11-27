@@ -120,13 +120,18 @@ export function CartProvider({ children }) {
         dispatch({ type: 'SYNC_ERROR', message: 'Some items from your cart are no longer available and were removed.' });
       }
     }).catch((err) => {
+      if (ownerRef.current === owner) itemsOwner.current = owner; // stop showing "loading"
       if (guest.length) saveGuestCart(guest); // keep it for the next try
       if (err.status !== 401) dispatch({ type: 'SYNC_ERROR', message: 'Could not load your cart. Please refresh the page.' });
     });
   }, [owner]);
 
+  // True until the account cart has arrived (pages should not treat it as "empty" yet).
+  const loading = remote && itemsOwner.current !== owner;
+
   const value = useMemo(() => ({
     items: state.items,
+    loading,
     count: cartCount(state.items),
     total: cartTotal(state.items),
     addItem: (product, quantity = 1) => {
@@ -152,7 +157,7 @@ export function CartProvider({ children }) {
      * what the customer saw. Without a server cart (mock mode) the browser cart is copied up.
      */
     refresh: () => (remote ? enqueue(cartApi.getCart) : syncCart(state.items)),
-  }), [state.items, remote]);
+  }), [state.items, remote, loading]);
 
   return (
     <CartContext.Provider value={value}>

@@ -12,7 +12,7 @@ import '../styles/checkout.css';
 // Requirement 4 + 15: the customer enters card details, the (mock) bank confirms,
 // then the invoice is shown and emailed. Card number and CVV are only sent, never stored here.
 export default function CheckoutPage() {
-  const { items, total, refresh, clear } = useCart();
+  const { items, total, loading, refresh, clear } = useCart();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({
@@ -23,6 +23,7 @@ export default function CheckoutPage() {
   const [message, setMessage] = useState('');
   const [paying, setPaying] = useState(false);
 
+  if (loading) return <div className="container section muted">Loading…</div>;
   if (!items.length && !paying) return <Navigate to="/cart" replace />;
 
   const onChange = (e) => {
