@@ -5,16 +5,32 @@ from .models import Cart, CartItem
 
 
 def add_to_cart(cart, product, quantity=1):
-    """Out-of-stock products can be found but never added (req 7); never more than the stock."""
+    """Out-of-stock products can be found but never added (req 7); never more than the stock.
+
+    The returned line has an extra `added` attribute: how many were really added, so the
+    API can tell the customer when the stock limit cut their request short.
+    """
     if quantity < 1:
         raise ValidationError("Quantity must be at least 1.")
+    if not product.is_priced:
+        raise ValidationError("This product is not on sale yet.")
     if not product.active or product.stock <= 0:
         raise ValidationError("This product is out of stock.")
-    item = CartItem.objects.filter(cart=cart, product=product).first()
-    if item is None:
-        return CartItem.objects.create(cart=cart, product=product, quantity=min(quantity, product.stock))
-    item.quantity = min(item.quantity + quantity, product.stock)
-    item.save(update_fields=["quantity"])
+    with transaction.atomic():
+        # get_or_create survives a double click: if another request creates the line between
+        # our lookup and our insert, it catches the unique-constraint error and fetches that line.
+        item, created = CartItem.objects.get_or_create(
+            cart=cart, product=product, defaults={"quantity": min(quantity, product.stock)}
+        )
+        if created:
+            item.added = item.quantity
+        else:
+            # Lock the line so two parallel adds are counted one after the other, not lost.
+            item = CartItem.objects.select_for_update().get(pk=item.pk)
+            before = item.quantity
+            item.quantity = min(before + quantity, product.stock)
+            item.save(update_fields=["quantity"])
+            item.added = item.quantity - before
     return item
 
 
@@ -51,6 +67,8 @@ def set_quantity(cart, product, quantity):
     if quantity == 0:
         remove_from_cart(cart, product)
         return None
+    if not product.is_priced:
+        raise ValidationError("This product is not on sale yet.")
     if not product.active or product.stock <= 0:
         raise ValidationError("This product is out of stock.")
     item, _ = CartItem.objects.update_or_create(

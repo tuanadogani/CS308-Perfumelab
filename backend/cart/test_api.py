@@ -90,3 +90,56 @@ class CartApiTests(APITestCase):
     def test_login_required(self):
         self.client.force_authenticate(None)
         self.assertEqual(self.client.get(reverse("cart")).status_code, 401)
+
+
+class CartStockLimitMessageTests(APITestCase):
+    """When the stock limit changes what the customer asked for, the API says so."""
+
+    def setUp(self):
+        self.user = make_user()
+        self.product = make_product(name="Bleu", stock=3)
+        self.client.force_authenticate(self.user)
+
+    def add(self, quantity):
+        return self.client.post(reverse("cart-items"), {"productId": self.product.pk, "quantity": quantity}, format="json")
+
+    def test_no_warning_when_everything_fits(self):
+        response = self.add(2)
+        self.assertEqual(response.status_code, 201)
+        self.assertNotIn("warning", response.data)
+
+    def test_warning_when_add_is_capped_at_stock(self):
+        response = self.add(5)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["items"][0]["quantity"], 3)
+        self.assertEqual(response.data["warning"], "Only 3 of Bleu in stock: 3 added, 3 in your cart now.")
+
+    def test_warning_counts_what_was_already_in_the_cart(self):
+        self.add(2)
+        response = self.add(2)
+        self.assertEqual(response.data["warning"], "Only 3 of Bleu in stock: 1 added, 3 in your cart now.")
+
+    def test_warning_when_cart_already_holds_all_stock(self):
+        self.add(3)
+        response = self.add(1)
+        self.assertEqual(response.data["items"][0]["quantity"], 3)
+        self.assertEqual(response.data["warning"], "You already have all 3 in stock of Bleu in your cart.")
+
+    def test_warning_when_quantity_set_above_stock(self):
+        self.add(1)
+        response = self.client.patch(reverse("cart-item", args=[self.product.pk]), {"quantity": 10}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["items"][0]["quantity"], 3)
+        self.assertIn("quantity set to 3", response.data["warning"])
+
+    def test_no_warning_when_quantity_set_within_stock(self):
+        self.add(1)
+        response = self.client.patch(reverse("cart-item", args=[self.product.pk]), {"quantity": 2}, format="json")
+        self.assertNotIn("warning", response.data)
+
+    def test_merge_lists_lines_cut_by_stock(self):
+        roomy = make_product(stock=10)
+        body = {"items": [{"productId": self.product.pk, "quantity": 5}, {"productId": roomy.pk, "quantity": 2}]}
+        response = self.client.post(reverse("cart-merge"), body, format="json")
+        self.assertEqual(response.data["adjusted"], [{"productId": self.product.pk, "requested": 5, "added": 3}])
+        self.assertEqual(response.data["skipped"], [])

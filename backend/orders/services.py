@@ -53,6 +53,8 @@ def place_order(user, cart, card=None, shipping_address=None):
     }
     for line in lines:
         product = locked[line.product_id]
+        if not product.is_priced:
+            raise ValidationError(f"{product.name} is not on sale yet.")
         if not product.active or product.stock < line.quantity:
             raise ValidationError(f"Not enough stock for {product.name}.")
 

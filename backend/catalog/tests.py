@@ -321,3 +321,27 @@ class FilterOptionsApiTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn({"name": "Brand From Database", "count": 1}, response.json()["brands"])
         self.assertEqual(set(response.json()), {"brands", "families", "categories"})
+
+
+class UnpricedProductTests(APITestCase):
+    """A product the product manager just added stays hidden until the sales manager prices it."""
+
+    def setUp(self):
+        self.priced = make_product(price="500.00")
+        self.unpriced = make_product(price="0.00")
+
+    def test_unpriced_product_not_listed(self):
+        ids = [p["id"] for p in self.client.get("/api/products/").data]
+        self.assertIn(self.priced.pk, ids)
+        self.assertNotIn(self.unpriced.pk, ids)
+
+    def test_unpriced_product_detail_returns_404(self):
+        self.assertEqual(self.client.get(f"/api/products/{self.unpriced.pk}/").status_code, 404)
+
+    def test_unpriced_product_not_counted_in_filters(self):
+        brand = self.client.get("/api/filters/").data["brands"][0]
+        self.assertEqual(brand["count"], 1)
+
+    def test_product_appears_once_priced(self):
+        self.unpriced.set_base_price("750.00")
+        self.assertEqual(self.client.get(f"/api/products/{self.unpriced.pk}/").status_code, 200)

@@ -69,6 +69,17 @@ class CheckoutTests(TestCase):
         self.product.refresh_from_db()
         self.assertEqual(self.product.stock, 1)
 
+    def test_unpriced_product_cannot_be_ordered_for_free(self):
+        # e.g. a line that reached the cart before the add-to-cart check existed
+        cart, _ = Cart.objects.get_or_create(user=self.user)
+        free = make_product(price="0.00", stock=5)
+        cart.items.create(product=free, quantity=1)
+        with self.assertRaises(ValidationError):
+            place_order(self.user, cart)
+        self.assertEqual(Order.objects.count(), 0)
+        free.refresh_from_db()
+        self.assertEqual(free.stock, 5)
+
 
 class LifecycleTests(TestCase):
     def setUp(self):

@@ -15,7 +15,8 @@ from .serializers import CategorySerializer, ProductSerializer
 
 def _products():
     return (
-        Product.objects.filter(active=True)
+        # Unpriced products (0 TL, waiting for the sales manager) are not shown to shoppers.
+        Product.objects.filter(active=True, base_price__gt=0)
         .select_related("brand", "category")
         .prefetch_related("families", "notes")
         .annotate(avg_rating=Avg("ratings__score"))

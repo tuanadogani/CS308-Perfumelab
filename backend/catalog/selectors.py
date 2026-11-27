@@ -39,7 +39,7 @@ def filter_options():
 
     from .models import Brand, Category, NoteFamily
 
-    active = Q(products__active=True)
+    active = Q(products__active=True, products__base_price__gt=0)  # same products as the shop shows
     def rows(model):
         return [
             {"name": row.name, "count": row.n}
