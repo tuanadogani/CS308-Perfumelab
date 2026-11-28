@@ -31,6 +31,8 @@ export default function StarRating({ rating = 0, onRate, readonly = false, size 
           className={`star ${displayRating >= star ? 'star--filled' : 'star--empty'}`}
           onMouseEnter={() => !readonly && setHoverRating(star)}
           onClick={() => handleClick(star)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleClick(star); } }}
+          tabIndex={readonly ? undefined : 0}
           role={readonly ? 'img' : 'button'}
           aria-label={`${star} star${star > 1 ? 's' : ''}`}
         >

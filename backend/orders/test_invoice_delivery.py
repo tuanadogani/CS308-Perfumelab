@@ -4,6 +4,7 @@ The SMTP tests swap smtplib.SMTP for a fake server, so they check exactly what D
 would say to Gmail (host, port, STARTTLS, login, message with the PDF) without network.
 """
 import email
+import email.header
 import importlib
 import io
 import os
@@ -22,7 +23,7 @@ SMTP = dict(
     EMAIL_BACKEND="django.core.mail.backends.smtp.EmailBackend",
     EMAIL_HOST="smtp.gmail.com", EMAIL_PORT=587, EMAIL_USE_TLS=True, EMAIL_USE_SSL=False,
     EMAIL_HOST_USER="shop@gmail.com", EMAIL_HOST_PASSWORD="app-password", EMAIL_TIMEOUT=10,
-    DEFAULT_FROM_EMAIL="PerfumeLab <shop@gmail.com>",
+    DEFAULT_FROM_EMAIL="Maison Lumière <shop@gmail.com>",
 )
 
 
@@ -54,6 +55,12 @@ class InvoicePdfContentTests(InvoiceFixture):
         self.assertIn("Şükrü Ağaoğlu", text)
         self.assertIn("Beyoğlu, İstanbul", text)
 
+    def test_pdf_and_email_carry_the_shop_name(self):
+        self.assertIn("Maison Lumière - Invoice", pdf_text(render_invoice_pdf(self.invoice)))
+        from orders.invoices import invoice_email_body
+        self.assertTrue(invoice_email_body(self.invoice).rstrip().endswith("Maison Lumière"))
+        self.assertNotIn("PerfumeLab", invoice_email_body(self.invoice))
+
     def test_pdf_is_a_single_valid_page(self):
         reader = PdfReader(io.BytesIO(render_invoice_pdf(self.invoice)))
         self.assertEqual(len(reader.pages), 1)
@@ -73,10 +80,10 @@ class SmtpDeliveryTests(InvoiceFixture):
         server.starttls.assert_called_once()
         server.login.assert_called_once_with("shop@gmail.com", "app-password")
         sender, recipients, raw = server.sendmail.call_args.args
-        self.assertEqual(sender, "PerfumeLab <shop@gmail.com>")
+        self.assertIn("shop@gmail.com", sender)
         self.assertEqual(recipients, [self.user.email])
         message = email.message_from_bytes(raw)
-        self.assertEqual(message["Subject"], f"Your PerfumeLab invoice {self.invoice.number}")
+        self.assertIn(f"Maison Lumière invoice {self.invoice.number}", str(email.header.make_header(email.header.decode_header(message["Subject"]))))
         attachments = [p for p in message.walk() if p.get_content_type() == "application/pdf"]
         self.assertEqual(attachments[0].get_filename(), f"{self.invoice.number}.pdf")
         self.assertTrue(attachments[0].get_payload(decode=True).startswith(b"%PDF"))

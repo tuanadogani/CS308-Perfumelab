@@ -26,6 +26,7 @@ class ProductSerializer(serializers.ModelSerializer):
     families = serializers.SlugRelatedField(many=True, read_only=True, slug_field="name")
     notes = serializers.SerializerMethodField()
     rating = serializers.SerializerMethodField()
+    ratingCount = serializers.SerializerMethodField()
     inStock = serializers.BooleanField(source="in_stock")
     price = serializers.FloatField()
     originalPrice = serializers.FloatField(source="base_price")
@@ -37,7 +38,7 @@ class ProductSerializer(serializers.ModelSerializer):
         fields = [
             "id", "name", "brand", "model", "serialNumber", "description", "category", "gender",
             "volumeMl", "notes", "families", "stock", "inStock", "price", "originalPrice",
-            "discountRate", "warrantyStatus", "distributor", "popularity", "rating", "imageUrl",
+            "discountRate", "warrantyStatus", "distributor", "popularity", "rating", "ratingCount", "imageUrl",
         ]
 
     def get_notes(self, obj):
@@ -56,6 +57,9 @@ class ProductSerializer(serializers.ModelSerializer):
         path = f'{reverse("product-image", args=[obj.pk])}?v={quote(filename)}'
         request = self.context.get("request")
         return request.build_absolute_uri(path) if request else path
+
+    def get_ratingCount(self, obj):
+        return getattr(obj, "rating_count", 0) or 0
 
     def get_rating(self, obj):
         average = getattr(obj, "avg_rating", None)

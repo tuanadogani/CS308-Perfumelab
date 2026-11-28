@@ -2,6 +2,7 @@ import logging
 from functools import partial
 
 from django.core.exceptions import PermissionDenied
+from django.conf import settings
 from django.core.mail import send_mail
 from django.db import transaction
 
@@ -15,7 +16,7 @@ log = logging.getLogger(__name__)
 
 def _send_discount_email(email, message, product_id):
     try:
-        sent = send_mail("An item on your wishlist is on sale", message, None, [email])
+        sent = send_mail(f"{settings.STORE_NAME}: an item on your wishlist is on sale", message, None, [email])
         if not sent:
             log.warning("Wishlist discount email was not sent for product %s", product_id)
     except Exception:

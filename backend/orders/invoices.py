@@ -4,6 +4,7 @@ import io
 from pathlib import Path
 
 
+from django.conf import settings
 from django.core.mail import EmailMessage
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -53,7 +54,7 @@ def render_invoice_pdf(invoice):
         return y - LINE
 
     c.setFont(FONT_BOLD, 20)
-    c.drawString(LEFT, y, "PerfumeLab - Invoice")
+    c.drawString(LEFT, y, f"{settings.STORE_NAME} - Invoice")
     y -= 10 * mm
     c.setFont(FONT, 10)
     for line in (
@@ -100,7 +101,7 @@ def invoice_email_body(invoice):
              f"Thank you for your order #{order.pk}. Your invoice {invoice.number} is attached as a PDF.", ""]
     for item in order.items.select_related("product__brand"):
         lines.append(f"  {item.quantity} x {item.product.brand.name} {item.product.name} - {item.line_total:.2f} TL")
-    lines += ["", f"Total: {invoice.total:.2f} TL", f"Delivery address: {order.shipping_address}", "", "PerfumeLab"]
+    lines += ["", f"Total: {invoice.total:.2f} TL", f"Delivery address: {order.shipping_address}", "", settings.STORE_NAME]
     return "\n".join(lines)
 
 
@@ -113,7 +114,7 @@ def seal_and_email(invoice, to=None):
     invoice.pdf_sha256 = hashlib.sha256(pdf).hexdigest()
     invoice.save(update_fields=["pdf_sha256"])
     message = EmailMessage(
-        subject=f"Your PerfumeLab invoice {invoice.number}",
+        subject=f"Your {settings.STORE_NAME} invoice {invoice.number}",
         body=invoice_email_body(invoice),
         to=[to or invoice.order.user.email],
     )

@@ -1,16 +1,19 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { getRevenueReport, getInvoices, getInvoicePdf, setDiscount } from '../../api/salesApi';
+import {
+  getRevenueReport, getInvoices, getInvoicePdf, setDiscount, getRefunds, receiveRefund, decideRefund,
+} from '../../api/salesApi';
 import { getProducts, getCategories } from '../../api/productApi';
 
 // Sales manager panel (Requirement 11): revenue / profit report, invoices, discounts.
+// Requirement 16: return requests are received, then approved (card refund + restock) or rejected.
 
 const TABS = [
   ['revenue', 'Revenue Report'],
   ['invoices', 'Invoices'],
   ['discounts', 'Pricing & Discounts'],
-  ['refunds', 'Refund Requests', 'Soon'],
+  ['refunds', 'Refund Requests'],
 ];
 
 const money = (n) =>
@@ -636,22 +639,175 @@ function DiscountsTab() {
   );
 }
 
-/* ---------- Refunds (placeholder until the backend endpoints exist) ---------- */
+/* ---------- Refunds (Requirement 16) ---------- */
 
-function RefundsTab() {
+const REFUND_FILTERS = [
+  ['requested', 'Pending'],
+  ['approved', 'Refunded'],
+  ['rejected', 'Rejected'],
+  ['all', 'All'],
+];
+
+export function refundStage(r) {
+  if (r.status === 'approved') return 'Refunded';
+  if (r.status === 'rejected') return 'Rejected';
+  return r.receivedAt ? 'Product received' : 'Waiting for product';
+}
+
+export function RefundsTab() {
+  const [refunds, setRefunds] = useState(null);
+  const [error, setError] = useState('');
+  const [filter, setFilter] = useState('requested');
+
+  const load = useCallback(() => {
+    setError('');
+    getRefunds().then(setRefunds).catch((e) => setError(e.message));
+  }, []);
+  useEffect(load, [load]);
+
+  const replace = (updated) => setRefunds((list) => list.map((r) => (r.id === updated.id ? updated : r)));
+
+  if (error && !refunds) return <p className="form-error">{error}</p>;
+  if (!refunds) return <p className="muted">Loading refund requests…</p>;
+
+  const pending = refunds.filter((r) => r.status === 'requested');
+  const shown = filter === 'all' ? refunds : refunds.filter((r) => r.status === filter);
+  const refundedTotal = refunds
+    .filter((r) => r.status === 'approved')
+    .reduce((sum, r) => sum + Number(r.paymentRefund?.amount ?? r.amount), 0);
+
   return (
-    <div className="coming-soon">
-      <span className="badge badge-low">Coming soon</span>
-      <h2>Refund Requests</h2>
-      <p className="muted">
-        Review refund requests from customers, approve or reject them, and see the refunded amount
-        at the original purchase price. This section will be available in an upcoming release.
+    <div className="refunds">
+      <div className="kpis">
+        <div className="kpi">
+          <span className="kpi__label">Pending requests</span>
+          <strong className="kpi__value">{pending.length}</strong>
+          <span className="muted small">{pending.filter((r) => !r.receivedAt).length} waiting for the product</span>
+        </div>
+        <div className="kpi">
+          <span className="kpi__label">Ready to decide</span>
+          <strong className="kpi__value">{pending.filter((r) => r.receivedAt).length}</strong>
+          <span className="muted small">Product back in store</span>
+        </div>
+        <div className="kpi">
+          <span className="kpi__label">Refunded</span>
+          <strong className="kpi__value">{money(refundedTotal)}</strong>
+          <span className="muted small">{refunds.filter((r) => r.status === 'approved').length} approved</span>
+        </div>
+        <div className="kpi">
+          <span className="kpi__label">Rejected</span>
+          <strong className="kpi__value">{refunds.filter((r) => r.status === 'rejected').length}</strong>
+          <span className="muted small">Stock unchanged</span>
+        </div>
+      </div>
+
+      <div className="toolbar">
+        <div className="chips" role="tablist" aria-label="Filter refund requests">
+          {REFUND_FILTERS.map(([key, label]) => (
+            <button key={key} role="tab" aria-selected={filter === key}
+              className={`chip${filter === key ? ' active' : ''}`} onClick={() => setFilter(key)}>
+              {label} ({key === 'all' ? refunds.length : refunds.filter((r) => r.status === key).length})
+            </button>
+          ))}
+        </div>
+        <button className="link-btn" onClick={load}>Refresh</button>
+      </div>
+      <p className="muted small refunds__hint">
+        1. Mark the request as received when the product arrives. 2. Approve to refund the price the customer
+        paid (discount included) to their card, put the product back in stock and email the customer.
       </p>
-      <ul className="coming-soon__list">
-        <li>Pending requests with order and product details</li>
-        <li>Approve or reject with one click</li>
-        <li>Refunded amount based on the price paid at purchase</li>
-      </ul>
+
+      {shown.length === 0 ? (
+        <div className="empty">No refund requests here.</div>
+      ) : (
+        <div className="table-wrap">
+          <table className="data-table refunds__table">
+            <thead>
+              <tr>
+                <th>Request</th><th>Customer</th><th>Product</th><th className="num">Refund</th>
+                <th>Status</th><th className="num">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r) => <RefundRow key={r.id} refund={r} onChange={replace} />)}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
+  );
+}
+
+function RefundRow({ refund: r, onChange }) {
+  const [confirm, setConfirm] = useState(null); // 'approve' | 'reject'
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const run = async (call) => {
+    setBusy(true); setError('');
+    try {
+      onChange(await call());
+      setConfirm(null);
+    } catch (e) {
+      setError(e.message || 'Something went wrong.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pending = r.status === 'requested';
+  const stageClass = r.status === 'approved' ? 'refunded' : r.status === 'rejected' ? 'cancelled'
+    : r.receivedAt ? 'in_transit' : 'processing';
+
+  return (
+    <tr>
+      <td>
+        <strong>#{r.id}</strong>
+        <div className="muted small">{fmtDateTime(r.requestedAt)}</div>
+      </td>
+      <td>{r.customerName}<div className="muted small">{r.customerEmail}</div></td>
+      <td>
+        <Link to={`/shop/${r.productId}`} className="underline">{r.productName}</Link>
+        <div className="muted small">Order #{r.orderId} · {r.quantity} × {money(r.unitPrice)}</div>
+        {r.reason && <div className="small refunds__reason">“{r.reason}”</div>}
+      </td>
+      <td className="num"><strong>{money(r.amount)}</strong><div className="muted small">price paid</div></td>
+      <td>
+        <span className={`status status--${stageClass}`}>{refundStage(r)}</span>
+        {r.receivedAt && pending && <div className="muted small">{fmtDateTime(r.receivedAt)}</div>}
+        {r.paymentRefund && <div className="muted small">Ref {r.paymentRefund.transactionId}</div>}
+        {r.decidedAt && <div className="muted small">{fmtDateTime(r.decidedAt)}</div>}
+      </td>
+      <td className="num refunds__actions">
+        {pending && !confirm && (
+          <>
+            {r.receivedAt ? (
+              <button className="btn btn-dark" disabled={busy} onClick={() => setConfirm('approve')}>Approve refund</button>
+            ) : (
+              <button className="btn btn-dark" disabled={busy} onClick={() => run(() => receiveRefund(r.id))}>
+                {busy ? 'Saving…' : 'Mark received'}
+              </button>
+            )}
+            <button className="link-btn" disabled={busy} onClick={() => setConfirm('reject')}>Reject</button>
+          </>
+        )}
+        {pending && confirm && (
+          <div className="refunds__confirm">
+            <span className="small">
+              {confirm === 'approve'
+                ? `Refund ${money(r.amount)} to the customer's card?`
+                : 'Reject this request? No money is refunded.'}
+            </span>
+            <button className="btn btn-dark" disabled={busy}
+              onClick={() => run(() => decideRefund(r.id, confirm === 'approve'))}>
+              {busy ? 'Saving…' : confirm === 'approve' ? 'Yes, refund' : 'Yes, reject'}
+            </button>
+            <button className="link-btn" disabled={busy} onClick={() => setConfirm(null)}>Back</button>
+          </div>
+        )}
+        {!pending && <span className="muted small">Done</span>}
+        {error && <p className="form-error refunds__error" role="alert">{error}</p>}
+      </td>
+    </tr>
   );
 }

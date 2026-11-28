@@ -8,10 +8,26 @@ class CommentSerializer(serializers.ModelSerializer):
 
     customerName = serializers.CharField(source="user.name", read_only=True)
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
+    rating = serializers.SerializerMethodField()
 
     class Meta:
         model = Comment
-        fields = ["id", "customerName", "text", "approved", "createdAt"]
+        fields = ["id", "customerName", "rating", "text", "approved", "createdAt"]
+        read_only_fields = fields
+
+    def get_rating(self, comment):
+        """The author's stars for this product, shown next to their name (None if not rated)."""
+        return getattr(comment, "author_rating", None)
+
+
+class OwnCommentSerializer(serializers.ModelSerializer):
+    """A comment as its author sees it while it waits for approval."""
+
+    createdAt = serializers.DateTimeField(source="created_at", read_only=True)
+
+    class Meta:
+        model = Comment
+        fields = ["id", "text", "createdAt"]
         read_only_fields = fields
 
 

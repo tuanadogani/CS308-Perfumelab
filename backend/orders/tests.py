@@ -292,6 +292,39 @@ class SalesAnalyticsApiTests(APITestCase):
         self.assertEqual(response.data["profit"], 300.0)
         self.assertEqual(response.data["profitMargin"], 30.0)
 
+    def _refund(self, order, product, status):
+        item = order.items.get(product=product)
+        RefundRequest.objects.create(order_item=item, amount=item.unit_price * item.quantity, status=status)
+
+    def test_approved_refund_line_is_not_revenue(self):
+        cart = cart_with(self.customer, self.p_default, 1)
+        add_to_cart(cart, self.p_custom, 1)
+        order = place_order(self.customer, cart)
+        self._refund(order, self.p_custom, "approved")
+        self.client.force_authenticate(self.sales_manager)
+        data = self.client.get("/api/sales/revenue/").data
+        self.assertEqual(data["totalRevenue"], 1000.0)  # only the kept Bleu de Chanel
+        self.assertEqual(data["totalCost"], 500.0)
+        self.assertEqual(data["totalOrders"], 1)
+
+    def test_pending_and_rejected_refunds_still_count(self):
+        first = place_order(self.customer, cart_with(self.customer, self.p_default, 1))
+        self._refund(first, self.p_default, "requested")
+        Cart.objects.filter(user=self.customer).delete()
+        second = place_order(self.customer, cart_with(self.customer, self.p_custom, 1))
+        self._refund(second, self.p_custom, "rejected")
+        self.client.force_authenticate(self.sales_manager)
+        self.assertEqual(self.client.get("/api/sales/revenue/").data["totalRevenue"], 2000.0)
+
+    def test_fully_refunded_order_disappears_from_the_report(self):
+        order = place_order(self.customer, cart_with(self.customer, self.p_default, 2))
+        self._refund(order, self.p_default, "approved")
+        Order.objects.filter(pk=order.pk).update(status=OrderStatus.REFUNDED)
+        self.client.force_authenticate(self.sales_manager)
+        data = self.client.get("/api/sales/revenue/").data
+        self.assertEqual(data["totalRevenue"], 0.0)
+        self.assertEqual(data["totalOrders"], 0)
+
     def test_cancelled_orders_excluded_from_analytics(self):
         order = place_order(self.customer, cart_with(self.customer, self.p_default, 1))
         cancel_order(order)

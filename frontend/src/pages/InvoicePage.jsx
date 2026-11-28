@@ -53,7 +53,7 @@ export default function InvoicePage() {
       <div className="invoice__card">
         <div className="invoice__head">
           <div>
-            <p className="eyebrow">PerfumeLab</p>
+            <p className="eyebrow">Maison Lumière</p>
             <h1>Invoice {invoice.number}</h1>
           </div>
           <div className="invoice__meta muted small">
@@ -94,6 +94,7 @@ export default function InvoicePage() {
               <a className="btn btn-ghost" href={pdfUrl} download={`${invoice.number}.pdf`}>Download PDF</a>
             </>
           ) : <span className="muted small">Preparing PDF…</span>}
+          <Link className="btn btn-ghost" to="/orders">My orders</Link>
           <Link className="btn btn-ghost" to="/shop">Continue shopping</Link>
         </div>
       </div>

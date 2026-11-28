@@ -209,11 +209,66 @@ class RatingApiTests(APITestCase):
         self.client.put(self.url, {"score": 2}, format="json")
         self.client.put(self.url, {"score": 5}, format="json")
         self.assertEqual(Rating.objects.filter(user=self.customer).count(), 1)
-        self.assertEqual(self.client.get(self.url).data, {"score": 5})
+        self.assertEqual(self.client.get(self.url).data["score"], 5)
 
     def test_get_returns_null_when_not_rated(self):
         self.client.force_authenticate(self.customer)
-        self.assertEqual(self.client.get(self.url).data, {"score": None})
+        self.assertEqual(self.client.get(self.url).data["score"], None)
+
+    def test_can_review_is_false_without_an_order(self):
+        self.client.force_authenticate(self.customer)
+        self.assertEqual(self.client.get(self.url).data,
+                         {"score": None, "canReview": False, "pendingComments": []})
+
+    def test_can_review_is_false_while_the_order_is_on_its_way(self):
+        buy(self.customer, self.product, deliver=False)
+        self.client.force_authenticate(self.customer)
+        self.assertFalse(self.client.get(self.url).data["canReview"])
+
+    def test_can_review_is_true_after_delivery(self):
+        buy(self.customer, self.product)
+        self.client.force_authenticate(self.customer)
+        self.assertTrue(self.client.get(self.url).data["canReview"])
+
+    def test_can_review_only_for_the_delivered_product(self):
+        buy(self.customer, make_product())
+        self.client.force_authenticate(self.customer)
+        self.assertFalse(self.client.get(self.url).data["canReview"])
+
+    def test_pending_comments_count_until_moderated(self):
+        buy(self.customer, self.product)
+        first = submit_comment(self.customer, self.product, "Lovely")
+        submit_comment(self.customer, self.product, "Still lovely")
+        self.client.force_authenticate(self.customer)
+        pending = self.client.get(self.url).data["pendingComments"]
+        self.assertEqual(sorted(c["text"] for c in pending), ["Lovely", "Still lovely"])
+        review_comment(first, make_user("product_manager"), approve=False)
+        self.assertEqual([c["text"] for c in self.client.get(self.url).data["pendingComments"]], ["Still lovely"])
+
+    def test_rating_without_comment_is_accepted(self):
+        buy(self.customer, self.product)
+        self.client.force_authenticate(self.customer)
+        self.assertEqual(self.client.put(self.url, {"score": 5}, format="json").status_code, 200)
+        from .models import Comment
+        self.assertFalse(Comment.objects.exists())
+
+    def test_staff_cannot_read_review_eligibility(self):
+        self.client.force_authenticate(make_user("product_manager"))
+        self.assertEqual(self.client.get(self.url).status_code, 403)
+
+    def test_product_reports_rating_count(self):
+        other = make_user()
+        for user, score in ((self.customer, 4), (other, 2)):
+            buy(user, self.product)
+            submit_rating(user, self.product, score)
+        data = self.client.get(f"/api/products/{self.product.pk}/").data
+        self.assertEqual(data["rating"], 3.0)
+        self.assertEqual(data["ratingCount"], 2)
+
+    def test_unrated_product_has_zero_count(self):
+        data = self.client.get(f"/api/products/{self.product.pk}/").data
+        self.assertIsNone(data["rating"])
+        self.assertEqual(data["ratingCount"], 0)
 
     def test_rating_is_live_in_product_average(self):
         buy(self.customer, self.product)
@@ -225,3 +280,90 @@ class RatingApiTests(APITestCase):
         for role in ("sales_manager", "product_manager", "support_agent"):
             self.client.force_authenticate(make_user(role))
             self.assertEqual(self.client.put(self.url, {"score": 5}, format="json").status_code, 403)
+
+
+class OwnCommentEditTests(APITestCase):
+    """Req 5: the author may edit a comment only while it waits for approval."""
+
+    def setUp(self):
+        self.customer = make_user()
+        self.product = make_product()
+        buy(self.customer, self.product)
+        self.comment = submit_comment(self.customer, self.product, "First try")
+        self.url = f"/api/comments/{self.comment.pk}/"
+
+    def patch(self, text, user=None):
+        self.client.force_authenticate(user or self.customer)
+        return self.client.patch(self.url, {"text": text}, format="json")
+
+    def test_author_can_edit_a_pending_comment(self):
+        response = self.patch("  Better wording  ")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["text"], "Better wording")
+        self.comment.refresh_from_db()
+        self.assertEqual(self.comment.text, "Better wording")
+        self.assertIsNone(self.comment.reviewed_at)  # still waits for the manager
+
+    def test_approved_comment_cannot_be_edited(self):
+        review_comment(self.comment, make_user("product_manager"), approve=True)
+        self.assertEqual(self.patch("Sneaky change").status_code, 400)
+        self.comment.refresh_from_db()
+        self.assertEqual(self.comment.text, "First try")
+
+    def test_rejected_comment_cannot_be_edited(self):
+        review_comment(self.comment, make_user("product_manager"), approve=False)
+        self.assertEqual(self.patch("Try again").status_code, 400)
+
+    def test_someone_elses_comment_is_not_found(self):
+        self.assertEqual(self.patch("Hijack", user=make_user()).status_code, 404)
+        self.comment.refresh_from_db()
+        self.assertEqual(self.comment.text, "First try")
+
+    def test_empty_text_is_rejected(self):
+        self.assertEqual(self.patch("   ").status_code, 400)
+
+    def test_guest_and_staff_cannot_edit(self):
+        self.assertEqual(self.client.patch(self.url, {"text": "x"}, format="json").status_code, 401)
+        self.assertEqual(self.patch("x", user=make_user("product_manager")).status_code, 403)
+
+    def test_customer_can_post_several_comments(self):
+        submit_comment(self.customer, self.product, "Second thought")
+        self.client.force_authenticate(self.customer)
+        response = self.client.post(f"/api/products/{self.product.pk}/comments/", {"text": "Third"}, format="json")
+        self.assertEqual(response.status_code, 201)
+        from .models import Comment
+        self.assertEqual(Comment.objects.filter(user=self.customer).count(), 3)
+
+
+class CommentAuthorRatingTests(APITestCase):
+    def setUp(self):
+        self.product = make_product()
+        self.manager = make_user("product_manager")
+        self.url = f"/api/products/{self.product.pk}/comments/"
+
+    def approved_comment(self, user, text):
+        buy(user, self.product)
+        review_comment(submit_comment(user, self.product, text), self.manager, approve=True)
+
+    def test_each_comment_shows_its_authors_rating(self):
+        rater, silent = make_user(name="Rater"), make_user(name="Silent")
+        self.approved_comment(rater, "Five stars")
+        submit_rating(rater, self.product, 5)
+        self.approved_comment(silent, "No stars given")
+        ratings = {c["text"]: c["rating"] for c in self.client.get(self.url).data}
+        self.assertEqual(ratings, {"Five stars": 5, "No stars given": None})
+
+    def test_changed_rating_is_reflected(self):
+        user = make_user()
+        self.approved_comment(user, "Changed my mind")
+        submit_rating(user, self.product, 2)
+        submit_rating(user, self.product, 4)
+        self.assertEqual(self.client.get(self.url).data[0]["rating"], 4)
+
+    def test_rating_on_another_product_is_not_used(self):
+        user = make_user()
+        other = make_product()
+        self.approved_comment(user, "Only this one")  # buys self.product
+        buy(make_user(), other)
+        Rating.objects.create(user=user, product=other, score=1)
+        self.assertIsNone(self.client.get(self.url).data[0]["rating"])

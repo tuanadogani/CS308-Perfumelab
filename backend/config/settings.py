@@ -98,4 +98,6 @@ EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "true").lower() == "true"
 EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "false").lower() == "true"
 EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "10"))
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "PerfumeLab <no-reply@perfumelab.local>")
+# Shop name on invoices and customer emails; matches the logo in the frontend navbar.
+STORE_NAME = "Maison Lumière"
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", f"{STORE_NAME} <{EMAIL_HOST_USER or 'no-reply@maisonlumiere.local'}>")

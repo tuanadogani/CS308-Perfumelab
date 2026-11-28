@@ -1,5 +1,6 @@
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { ROLE_LABELS } from '../constants/roles';
+import { ROLE_LABELS, ROLES } from '../constants/roles';
 
 // Requirement 14: the customer can view their name, email and home address on a profile page.
 export default function ProfilePage() {
@@ -13,7 +14,9 @@ export default function ProfilePage() {
           <dt>Email</dt><dd>{user.email}</dd>
           <dt>Home Address</dt><dd>{user.homeAddress || '—'}</dd>
         </dl>
-        <p className="muted small">Order history will be added in a later sprint.</p>
+        {user.role === ROLES.CUSTOMER && (
+          <Link to="/orders" className="btn btn-dark">View my orders</Link>
+        )}
       </div>
     </div>
   );

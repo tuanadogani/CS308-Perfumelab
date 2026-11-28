@@ -1,6 +1,7 @@
 import logging
 from functools import partial
 
+from django.conf import settings
 from django.core.mail import send_mail
 from django.db import transaction
 
@@ -26,7 +27,8 @@ def notify_refund_approved(refund, payment_refund):
         f"Quantity: {item.quantity}\n"
         f"Refunded amount: {amount}\n"
         "The refund was issued to the original payment method.\n"
-        f"Refund reference: {payment_refund.transaction_id}\n"
+        f"Refund reference: {payment_refund.transaction_id}\n\n"
+        f"{settings.STORE_NAME}\n"
     )
     transaction.on_commit(
         partial(_send_approval_email, order.user.email, body, refund.pk), robust=True
@@ -36,7 +38,7 @@ def notify_refund_approved(refund, payment_refund):
 def _send_approval_email(recipient, body, refund_id):
     """Email is best effort; the committed refund and in-app alert must survive SMTP failures."""
     try:
-        sent = send_mail("Your refund was approved", body, None, [recipient], fail_silently=False)
+        sent = send_mail(f"{settings.STORE_NAME}: your refund was approved", body, None, [recipient], fail_silently=False)
         if not sent:
             log.warning("Refund approval email was not sent for request %s", refund_id)
     except Exception:

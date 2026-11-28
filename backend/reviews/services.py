@@ -1,4 +1,6 @@
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
+from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 
 from orders.models import OrderItem, OrderStatus
@@ -29,6 +31,30 @@ def submit_comment(user, product, text):
     return Comment.objects.create(user=user, product=product, text=text.strip())
 
 
+@transaction.atomic
+def edit_comment(user, comment_id, text):
+    """The author may reword a comment only while it waits for moderation.
+
+    The row is locked like in moderation, so an edit and an approval cannot interleave:
+    a product manager never approves text that changes afterwards.
+    """
+    comment = Comment.objects.select_for_update().filter(pk=comment_id, user=user).first()
+    if comment is None:
+        raise Comment.DoesNotExist
+    if comment.reviewed_at is not None:
+        raise ValidationError("This comment was already reviewed and can no longer be edited.")
+    if not text.strip():
+        raise ValidationError("Comment cannot be empty.")
+    comment.text = text.strip()
+    comment.save(update_fields=["text"])
+    return comment
+
+
+def pending_comments(user, product):
+    """The author's own comments that are still waiting for a product manager."""
+    return Comment.objects.filter(user=user, product=product, reviewed_at__isnull=True)
+
+
 def review_comment(comment, manager, approve):
     if manager.role != "product_manager":
         raise PermissionDenied("Only product managers can moderate comments.")
@@ -40,4 +66,6 @@ def review_comment(comment, manager, approve):
 
 
 def visible_comments(product):
-    return Comment.objects.filter(product=product, approved=True)
+    """Approved comments, each with its author's current star rating (or None)."""
+    author_rating = Rating.objects.filter(user=OuterRef("user"), product=OuterRef("product")).values("score")[:1]
+    return Comment.objects.filter(product=product, approved=True).annotate(author_rating=Subquery(author_rating))

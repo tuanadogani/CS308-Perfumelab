@@ -102,7 +102,8 @@ class SalesRevenueReportView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        orders = Order.objects.exclude(status=OrderStatus.CANCELLED)
+        # A fully refunded order is no longer a sale (req 16), like a cancelled one.
+        orders = Order.objects.exclude(status__in=[OrderStatus.CANCELLED, OrderStatus.REFUNDED])
         if start_date:
             orders = orders.filter(created_at__date__gte=start_date)
         if end_date:
@@ -110,7 +111,10 @@ class SalesRevenueReportView(APIView):
 
         day_stats = defaultdict(lambda: {"revenue": Decimal("0"), "cost": Decimal("0"), "orders": set()})
         items = (
+            # Approved returns gave the money back and put the product back in stock (req 16),
+            # so they are no longer revenue. Pending or rejected requests still count.
             OrderItem.objects.filter(order__in=orders)
+            .exclude(refund__status="approved")
             .select_related("order")
             .only("order_id", "quantity", "unit_price", "unit_cost", "order__created_at")
         )

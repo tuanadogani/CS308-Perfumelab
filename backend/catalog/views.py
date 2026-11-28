@@ -1,4 +1,4 @@
-from django.db.models import Avg
+from django.db.models import Avg, Count
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.views import View
@@ -19,7 +19,7 @@ def _products():
         Product.objects.filter(active=True, base_price__gt=0)
         .select_related("brand", "category")
         .prefetch_related("families", "notes")
-        .annotate(avg_rating=Avg("ratings__score"))
+        .annotate(avg_rating=Avg("ratings__score"), rating_count=Count("ratings", distinct=True))
     )
 
 

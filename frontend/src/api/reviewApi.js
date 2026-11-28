@@ -37,3 +37,15 @@ export async function submitComment(productId, text) {
     body: { text },
   });
 }
+
+/**
+ * Edit one of your own comments while it is still waiting for approval.
+ * 400 once a product manager has approved or rejected it.
+ * Returns: { id, text, createdAt }
+ */
+export async function updateComment(commentId, text) {
+  return request(`/comments/${encodeURIComponent(commentId)}/`, {
+    method: 'PATCH',
+    body: { text },
+  });
+}

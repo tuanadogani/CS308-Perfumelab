@@ -399,7 +399,7 @@ class RefundConcurrencyTests(TransactionTestCase):
         self.assertCountEqual(results, ["approved", "already decided"])
         self.assertEqual(PaymentRefund.objects.filter(refund_request=refund).count(), 1)
         self.assertEqual(Notification.objects.filter(user=customer).count(), 1)
-        self.assertEqual(sum(message.subject == "Your refund was approved" for message in mail.outbox), 1)
+        self.assertEqual(sum(message.subject == "Maison Lumière: your refund was approved" for message in mail.outbox), 1)
         product.refresh_from_db()
         self.assertEqual(product.stock, 5)
 

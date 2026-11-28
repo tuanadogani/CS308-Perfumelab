@@ -23,3 +23,15 @@ export const getInvoicePdf = (id, download = false) =>
   requestBlob(`/sales/invoices/${encodeURIComponent(id)}/pdf/${download ? '?download=true' : ''}`);
 export const setDiscount = ({ productIds, discountRate }) =>
   request('/sales/discounts/', { method: 'POST', body: { productIds, discountRate } });
+
+/**
+ * Return / refund requests (Requirement 16), backend/refunds/views.py:
+ *   GET  /sales/refunds/?status=requested|approved|rejected
+ *   POST /sales/refunds/:id/receive/                 the returned product arrived at the store
+ *   POST /sales/refunds/:id/decision/ { approve }    approve needs the receipt; refunds the card,
+ *                                                    restocks and emails the customer. 502 = bank error.
+ */
+export const getRefunds = (status) => request(`/sales/refunds/${status ? `?status=${encodeURIComponent(status)}` : ''}`);
+export const receiveRefund = (id) => request(`/sales/refunds/${encodeURIComponent(id)}/receive/`, { method: 'POST' });
+export const decideRefund = (id, approve) =>
+  request(`/sales/refunds/${encodeURIComponent(id)}/decision/`, { method: 'POST', body: { approve } });

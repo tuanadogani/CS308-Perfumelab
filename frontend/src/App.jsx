@@ -14,6 +14,7 @@ import WishlistPage from './pages/WishlistPage';
 import ProfilePage from './pages/ProfilePage';
 import CheckoutPage from './pages/CheckoutPage';
 import InvoicePage from './pages/InvoicePage';
+import OrdersPage from './pages/OrdersPage';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import SalesDashboard from './pages/admin/SalesDashboard';
 import ProductManagerDashboard from './pages/admin/ProductManagerDashboard';
@@ -38,9 +39,10 @@ export default function App() {
           <Route path="/profile" element={<ProfilePage />} />
         </Route>
 
-        {/* Customers only (Requirement 4: checkout + on-screen invoice) */}
+        {/* Customers only (Requirement 3: order history; 4: checkout + on-screen invoice) */}
         <Route element={<ProtectedRoute roles={[ROLES.CUSTOMER]} />}>
           <Route path="/checkout" element={<CheckoutPage />} />
+          <Route path="/orders" element={<OrdersPage />} />
           <Route path="/orders/:id/invoice" element={<InvoicePage />} />
         </Route>
 

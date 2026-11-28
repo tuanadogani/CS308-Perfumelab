@@ -1,7 +1,7 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
-import { STAFF_ROLES, ROLE_LABELS } from '../constants/roles';
+import { STAFF_ROLES, ROLE_LABELS, ROLES } from '../constants/roles';
 
 export default function Navbar() {
   const { user, isAuthenticated, hasRole, logout } = useAuth();
@@ -18,6 +18,7 @@ export default function Navbar() {
         <nav className="navbar__links">
           <NavLink to="/" end>Home</NavLink>
           <NavLink to="/shop">Collection</NavLink>
+          {hasRole(ROLES.CUSTOMER) && <NavLink to="/orders">My Orders</NavLink>}
           {hasRole(...STAFF_ROLES) && <NavLink to="/admin">Admin</NavLink>}
         </nav>
         <div className="navbar__actions">
